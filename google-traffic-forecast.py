@@ -36,7 +36,7 @@ def main():
     st.write("""
         This app loads GA4 data, fits a Prophet model to forecast future sessions, 
         and displays both the actual and forecasted values along with shaded regions 
-        representing Google algorithm update periods.
+        representing Google algorithm update periods. You will need one column for Date and one column for Sessions.
     """)
 
     # Load data interactively.
