@@ -121,7 +121,7 @@ def main():
     st.write("""
         This app loads GA4 data, fits a Prophet model to forecast future sessions, 
         and displays both the actual and forecasted values along with shaded regions 
-        representing Google algorithm update periods.
+        representing Google algorithm update periods dating back to the January 2023.
     """)
     
     # Sidebar selection for forecast type.
