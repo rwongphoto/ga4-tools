@@ -10,13 +10,10 @@ from torch.nn import SmoothL1Loss # PyTorch loss class
 from torch.optim import AdamW # PyTorch optimizer class
 from torch.optim.lr_scheduler import OneCycleLR # PyTorch LR scheduler class
 from numpy.core.multiarray import _reconstruct # NumPy array reconstruction function
-from numpy import ndarray, dtype # NumPy types
+from numpy import ndarray, dtype # <-- ADDED dtype IMPORT
 
-# Import the configuration classes mentioned in previous errors AND likely candidates
-from neuralprophet.configure import ( # Using parentheses for multi-line import
-    ConfigSeasonality, Season, Train, Trend,
-    ConfigModel, ConfigData, ConfigNormalization, ConfigAr, ConfigLags, ConfigExperiment # <-- ADDED PREDICTIVE GUESSES
-)
+# Import the configuration classes mentioned in previous errors
+from neuralprophet.configure import ConfigSeasonality, Season, Train, Trend
 # Import the loss function class mentioned in the latest error
 from neuralprophet.custom_loss_metrics import PinballLoss
 
@@ -35,41 +32,24 @@ ADD_SAFE_GLOBALS_MESSAGE = "" # Store message instead of printing directly
 try:
     # Add classes/functions that might be pickled/unpickled by NeuralProphet internally.
     safe_globals_list = [
-        # Previously identified:
-        ConfigSeasonality, Season, Train, Trend,
+        ConfigSeasonality, Season, Train, Trend, # NeuralProphet configure classes
         PinballLoss,                       # NeuralProphet custom loss class
         SmoothL1Loss,                      # PyTorch loss class
         AdamW,                             # PyTorch optimizer class
         OneCycleLR,                        # PyTorch LR scheduler class
         _reconstruct,                      # NumPy array reconstruction function
         ndarray,                           # NumPy array type
-        dtype,                             # NumPy data type class
-        # Predictive additions:
-        ConfigModel, ConfigData, ConfigNormalization, ConfigAr, ConfigLags, ConfigExperiment # <-- ADDED PREDICTIVE GUESSES
-    ]
-    # Remove potential duplicates just in case (though unlikely needed here)
-    # Important: Ensure all imported classes actually exist in the installed neuralprophet version
-    # We wrap the serialization call itself in a try-except to catch ImportErrors during the list definition
-    try:
-        safe_globals_list_final = list(set(safe_globals_list)) # Create final list after imports succeed
-        serialization.add_safe_globals(safe_globals_list_final)
-        ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list_final)} class(es)/function(s) to torch safe globals (predictive)." # Updated message
-    except NameError as ne:
-         ADD_SAFE_GLOBALS_MESSAGE = f"Warning: Could not add all predicted classes to safe globals. Class '{ne.name}' likely doesn't exist in this NeuralProphet version. Remove it from the imports and list."
-         # Optionally, re-run with just the confirmed classes if NameError occurs
-         confirmed_classes = [ # List only classes confirmed by previous errors
-             ConfigSeasonality, Season, Train, Trend, PinballLoss, SmoothL1Loss,
-             AdamW, OneCycleLR, _reconstruct, ndarray, dtype
-         ]
-         serialization.add_safe_globals(list(set(confirmed_classes)))
-         ADD_SAFE_GLOBALS_MESSAGE += f"\nInfo: Reverted to adding {len(set(confirmed_classes))} confirmed classes/functions only."
-
+        dtype                              # NumPy data type class
+    ] # <-- ADDED dtype
+    serialization.add_safe_globals(safe_globals_list)
+    # Store message to show later inside main()
+    ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es)/function(s) to torch safe globals." # Updated message slightly
 
 except AttributeError:
     ADD_SAFE_GLOBALS_MESSAGE = "Info: torch.serialization.add_safe_globals not used (likely older PyTorch version)."
-except ImportError as imp_err:
+except ImportError:
     # Make the ImportError message slightly more specific if possible
-    ADD_SAFE_GLOBALS_MESSAGE = f"Warning: Could not import one or more necessary classes/functions for torch compatibility: {imp_err}" # Updated message
+    ADD_SAFE_GLOBALS_MESSAGE = "Warning: Could not import one or more necessary classes/functions for torch compatibility." # Updated message
 except Exception as e:
     ADD_SAFE_GLOBALS_MESSAGE = f"Warning: An unexpected error occurred while adding safe globals for torch: {e}"
 # --- End of allowlist section ---
@@ -168,7 +148,7 @@ def plot_daily_forecast(df, forecast_end_date):
         yearly_seasonality=True,
         weekly_seasonality=True,
         daily_seasonality=False, # Usually not needed/helpful for daily website traffic
-        # n_lags=7, # Example: Uncomment to add Autoregression (might need more data - and ConfigLags/ConfigAr in safe list)
+        # n_lags=7, # Example: Uncomment to add Autoregression (might need more data)
         quantiles=[0.05, 0.95] # For 90% uncertainty intervals
     )
 
