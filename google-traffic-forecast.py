@@ -120,7 +120,7 @@ def main():
         This app loads GA4 data, fits a Prophet model to forecast daily sessions,
         and displays actual vs. forecasted traffic with shaded Google update ranges.
         A summary dashboard with a year-over-year comparison is provided below.
-        The CSV file must have a column for "Date" and one for "Sessions".
+        The CSV file must have a column for "Date" and one for "Sessions". Date should be sorted by oldest date first.
     """)
     
     # Sidebar: set forecast end date
