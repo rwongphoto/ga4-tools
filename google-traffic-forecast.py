@@ -7,8 +7,10 @@ import logging
 import torch # Import torch
 from torch import serialization # Import serialization module
 
-# Import the classes mentioned in the errors
-from neuralprophet.configure import ConfigSeasonality, Season, Train # <-- ADDED Train
+# Import the configuration classes mentioned in previous errors
+from neuralprophet.configure import ConfigSeasonality, Season, Train
+# Import the loss function class mentioned in the latest error
+from neuralprophet.custom_loss_metrics import PinballLoss # <-- ADDED THIS IMPORT
 
 # --- MOVE st.set_page_config() HERE ---
 # Must be the first Streamlit command executed
@@ -24,7 +26,7 @@ set_log_level("ERROR")
 ADD_SAFE_GLOBALS_MESSAGE = "" # Store message instead of printing directly
 try:
     # Add classes that might be pickled/unpickled by NeuralProphet internally.
-    safe_globals_list = [ConfigSeasonality, Season, Train] # <-- ADDED Train
+    safe_globals_list = [ConfigSeasonality, Season, Train, PinballLoss] # <-- ADDED PinballLoss
     serialization.add_safe_globals(safe_globals_list)
     # Store message to show later inside main()
     ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es) to torch safe globals for compatibility."
@@ -32,7 +34,8 @@ try:
 except AttributeError:
     ADD_SAFE_GLOBALS_MESSAGE = "Info: torch.serialization.add_safe_globals not used (likely older PyTorch version)."
 except ImportError:
-    ADD_SAFE_GLOBALS_MESSAGE = "Warning: Could not import necessary NeuralProphet configure classes for torch."
+    # Make the ImportError message slightly more specific if possible
+    ADD_SAFE_GLOBALS_MESSAGE = "Warning: Could not import one or more necessary NeuralProphet classes for torch."
 except Exception as e:
     ADD_SAFE_GLOBALS_MESSAGE = f"Warning: An unexpected error occurred while adding safe globals for torch: {e}"
 # --- End of allowlist section ---
