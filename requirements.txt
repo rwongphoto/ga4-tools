@@ -2,4 +2,5 @@ streamlit
 pandas
 matplotlib
 neuralprophet
-torch
+torch<2.6  # Or specify a specific version like torch==2.5.1
+numpy
