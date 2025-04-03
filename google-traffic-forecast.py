@@ -8,10 +8,10 @@ import torch # Import torch
 from torch import serialization # Import serialization module
 from torch.nn import SmoothL1Loss # PyTorch loss class
 from torch.optim import AdamW # PyTorch optimizer class
-from torch.optim.lr_scheduler import OneCycleLR # <-- ADDED THIS PYTORCH SCHEDULER IMPORT
+from torch.optim.lr_scheduler import OneCycleLR # PyTorch LR scheduler class
 
 # Import the configuration classes mentioned in previous errors
-from neuralprophet.configure import ConfigSeasonality, Season, Train
+from neuralprophet.configure import ConfigSeasonality, Season, Train, Trend # <-- ADDED Trend
 # Import the loss function class mentioned in the latest error
 from neuralprophet.custom_loss_metrics import PinballLoss
 
@@ -30,12 +30,12 @@ ADD_SAFE_GLOBALS_MESSAGE = "" # Store message instead of printing directly
 try:
     # Add classes that might be pickled/unpickled by NeuralProphet internally.
     safe_globals_list = [
-        ConfigSeasonality, Season, Train, # NeuralProphet configure classes
+        ConfigSeasonality, Season, Train, Trend, # <-- ADDED Trend
         PinballLoss,                       # NeuralProphet custom loss class
         SmoothL1Loss,                      # PyTorch loss class
         AdamW,                             # PyTorch optimizer class
         OneCycleLR                         # PyTorch LR scheduler class
-    ] # <-- ADDED OneCycleLR
+    ]
     serialization.add_safe_globals(safe_globals_list)
     # Store message to show later inside main()
     ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es) to torch safe globals for compatibility."
