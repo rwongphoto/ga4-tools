@@ -8,7 +8,7 @@ import torch # Import torch
 from torch import serialization # Import serialization module
 
 # Import the classes mentioned in the errors
-from neuralprophet.configure import ConfigSeasonality, Season # <-- ADDED Season
+from neuralprophet.configure import ConfigSeasonality, Season, Train # <-- ADDED Train
 
 # --- MOVE st.set_page_config() HERE ---
 # Must be the first Streamlit command executed
@@ -24,7 +24,7 @@ set_log_level("ERROR")
 ADD_SAFE_GLOBALS_MESSAGE = "" # Store message instead of printing directly
 try:
     # Add classes that might be pickled/unpickled by NeuralProphet internally.
-    safe_globals_list = [ConfigSeasonality, Season] # <-- ADDED Season
+    safe_globals_list = [ConfigSeasonality, Season, Train] # <-- ADDED Train
     serialization.add_safe_globals(safe_globals_list)
     # Store message to show later inside main()
     ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es) to torch safe globals for compatibility."
