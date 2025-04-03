@@ -9,9 +9,10 @@ from torch import serialization # Import serialization module
 from torch.nn import SmoothL1Loss # PyTorch loss class
 from torch.optim import AdamW # PyTorch optimizer class
 from torch.optim.lr_scheduler import OneCycleLR # PyTorch LR scheduler class
+from numpy.core.multiarray import _reconstruct # <-- ADDED NUMPY RECONSTRUCT IMPORT
 
 # Import the configuration classes mentioned in previous errors
-from neuralprophet.configure import ConfigSeasonality, Season, Train, Trend # <-- ADDED Trend
+from neuralprophet.configure import ConfigSeasonality, Season, Train, Trend
 # Import the loss function class mentioned in the latest error
 from neuralprophet.custom_loss_metrics import PinballLoss
 
@@ -28,23 +29,24 @@ set_log_level("ERROR")
 # This addresses the "Weights only load failed" error with PyTorch 2.6+.
 ADD_SAFE_GLOBALS_MESSAGE = "" # Store message instead of printing directly
 try:
-    # Add classes that might be pickled/unpickled by NeuralProphet internally.
+    # Add classes/functions that might be pickled/unpickled by NeuralProphet internally.
     safe_globals_list = [
-        ConfigSeasonality, Season, Train, Trend, # <-- ADDED Trend
+        ConfigSeasonality, Season, Train, Trend, # NeuralProphet configure classes
         PinballLoss,                       # NeuralProphet custom loss class
         SmoothL1Loss,                      # PyTorch loss class
         AdamW,                             # PyTorch optimizer class
-        OneCycleLR                         # PyTorch LR scheduler class
-    ]
+        OneCycleLR,                        # PyTorch LR scheduler class
+        _reconstruct                       # NumPy array reconstruction function
+    ] # <-- ADDED _reconstruct
     serialization.add_safe_globals(safe_globals_list)
     # Store message to show later inside main()
-    ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es) to torch safe globals for compatibility."
+    ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es)/function(s) to torch safe globals." # Updated message slightly
 
 except AttributeError:
     ADD_SAFE_GLOBALS_MESSAGE = "Info: torch.serialization.add_safe_globals not used (likely older PyTorch version)."
 except ImportError:
     # Make the ImportError message slightly more specific if possible
-    ADD_SAFE_GLOBALS_MESSAGE = "Warning: Could not import one or more necessary classes for torch compatibility."
+    ADD_SAFE_GLOBALS_MESSAGE = "Warning: Could not import one or more necessary classes/functions for torch compatibility." # Updated message
 except Exception as e:
     ADD_SAFE_GLOBALS_MESSAGE = f"Warning: An unexpected error occurred while adding safe globals for torch: {e}"
 # --- End of allowlist section ---
@@ -64,6 +66,12 @@ def load_data():
             if df.empty:
                  st.error("Uploaded CSV file is empty.")
                  return None
+            # Add NumPy dependency check
+            try:
+                import numpy
+            except ImportError:
+                st.error("NumPy library is required but not installed. Please install it (`pip install numpy`).")
+                return None
             return df
         except Exception as e:
             st.error(f"Error reading CSV file: {e}")
@@ -418,7 +426,7 @@ def main():
     forecast_end_date = pd.to_datetime(forecast_end_date_input)
 
     st.sidebar.markdown("---")
-    st.sidebar.info("Ensure `neuralprophet`, `torch`, `pandas`, `matplotlib`, and `streamlit` are installed.")
+    st.sidebar.info("Ensure `neuralprophet`, `torch`, `numpy`, `pandas`, `matplotlib`, and `streamlit` are installed.") # Added numpy here
     # --- End Sidebar ---
 
 
