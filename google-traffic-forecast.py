@@ -7,7 +7,8 @@ import logging
 import torch # Import torch
 from torch import serialization # Import serialization module
 from torch.nn import SmoothL1Loss # PyTorch loss class
-from torch.optim import AdamW # <-- ADDED THIS PYTORCH OPTIMIZER IMPORT
+from torch.optim import AdamW # PyTorch optimizer class
+from torch.optim.lr_scheduler import OneCycleLR # <-- ADDED THIS PYTORCH SCHEDULER IMPORT
 
 # Import the configuration classes mentioned in previous errors
 from neuralprophet.configure import ConfigSeasonality, Season, Train
@@ -32,8 +33,9 @@ try:
         ConfigSeasonality, Season, Train, # NeuralProphet configure classes
         PinballLoss,                       # NeuralProphet custom loss class
         SmoothL1Loss,                      # PyTorch loss class
-        AdamW                              # PyTorch optimizer class
-    ] # <-- ADDED AdamW
+        AdamW,                             # PyTorch optimizer class
+        OneCycleLR                         # PyTorch LR scheduler class
+    ] # <-- ADDED OneCycleLR
     serialization.add_safe_globals(safe_globals_list)
     # Store message to show later inside main()
     ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es) to torch safe globals for compatibility."
