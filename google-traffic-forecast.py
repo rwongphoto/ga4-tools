@@ -6,11 +6,12 @@ from datetime import timedelta
 import logging
 import torch # Import torch
 from torch import serialization # Import serialization module
+from torch.nn import SmoothL1Loss # <-- ADDED THIS PYTORCH LOSS IMPORT
 
 # Import the configuration classes mentioned in previous errors
 from neuralprophet.configure import ConfigSeasonality, Season, Train
 # Import the loss function class mentioned in the latest error
-from neuralprophet.custom_loss_metrics import PinballLoss # <-- ADDED THIS IMPORT
+from neuralprophet.custom_loss_metrics import PinballLoss
 
 # --- MOVE st.set_page_config() HERE ---
 # Must be the first Streamlit command executed
@@ -26,7 +27,11 @@ set_log_level("ERROR")
 ADD_SAFE_GLOBALS_MESSAGE = "" # Store message instead of printing directly
 try:
     # Add classes that might be pickled/unpickled by NeuralProphet internally.
-    safe_globals_list = [ConfigSeasonality, Season, Train, PinballLoss] # <-- ADDED PinballLoss
+    safe_globals_list = [
+        ConfigSeasonality, Season, Train, # NeuralProphet configure classes
+        PinballLoss,                       # NeuralProphet custom loss class
+        SmoothL1Loss                       # PyTorch loss class
+    ] # <-- ADDED SmoothL1Loss
     serialization.add_safe_globals(safe_globals_list)
     # Store message to show later inside main()
     ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es) to torch safe globals for compatibility."
@@ -35,7 +40,7 @@ except AttributeError:
     ADD_SAFE_GLOBALS_MESSAGE = "Info: torch.serialization.add_safe_globals not used (likely older PyTorch version)."
 except ImportError:
     # Make the ImportError message slightly more specific if possible
-    ADD_SAFE_GLOBALS_MESSAGE = "Warning: Could not import one or more necessary NeuralProphet classes for torch."
+    ADD_SAFE_GLOBALS_MESSAGE = "Warning: Could not import one or more necessary classes for torch compatibility."
 except Exception as e:
     ADD_SAFE_GLOBALS_MESSAGE = f"Warning: An unexpected error occurred while adding safe globals for torch: {e}"
 # --- End of allowlist section ---
