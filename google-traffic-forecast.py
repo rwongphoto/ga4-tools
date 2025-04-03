@@ -6,7 +6,8 @@ from datetime import timedelta
 import logging
 import torch # Import torch
 from torch import serialization # Import serialization module
-from torch.nn import SmoothL1Loss # <-- ADDED THIS PYTORCH LOSS IMPORT
+from torch.nn import SmoothL1Loss # PyTorch loss class
+from torch.optim import AdamW # <-- ADDED THIS PYTORCH OPTIMIZER IMPORT
 
 # Import the configuration classes mentioned in previous errors
 from neuralprophet.configure import ConfigSeasonality, Season, Train
@@ -30,8 +31,9 @@ try:
     safe_globals_list = [
         ConfigSeasonality, Season, Train, # NeuralProphet configure classes
         PinballLoss,                       # NeuralProphet custom loss class
-        SmoothL1Loss                       # PyTorch loss class
-    ] # <-- ADDED SmoothL1Loss
+        SmoothL1Loss,                      # PyTorch loss class
+        AdamW                              # PyTorch optimizer class
+    ] # <-- ADDED AdamW
     serialization.add_safe_globals(safe_globals_list)
     # Store message to show later inside main()
     ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es) to torch safe globals for compatibility."
