@@ -1,13 +1,8 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+from prophet import Prophet
 from datetime import timedelta
-import torch
-from neuralprophet import NeuralProphet
-from neuralprophet.configure import ConfigSeasonality
-
-# Allow the global used by NeuralProphet to be loaded safely.
-torch.serialization.add_safe_global("neuralprophet.configure.ConfigSeasonality", ConfigSeasonality)
 
 def load_data():
     uploaded_file = st.file_uploader("Choose a GA4 CSV file", type="csv")
@@ -18,32 +13,26 @@ def load_data():
         st.info("Awaiting CSV file upload...")
         return None
 
-def forecast_daily_neuralprophet(df, forecast_end_date):
+def plot_daily_forecast(df, forecast_end_date):
     # Convert 'Date' column from string format (YYYYMMDD) to datetime
     df['Date'] = pd.to_datetime(df['Date'], format='%Y%m%d')
-    # Rename columns for NeuralProphet (expects 'ds' and 'y')
+    # Rename columns for Prophet
     df.rename(columns={'Date': 'ds', 'Sessions': 'y'}, inplace=True)
     last_date = df['ds'].max()
     
-    # Compute the number of days to forecast
+    # Calculate forecast periods as the number of days from the last observed date
     periods = (forecast_end_date - last_date).days
     if periods <= 0:
-        st.error("Forecast end date must be after the last observed date.")
-        return None, last_date, df
-    
-    # Create and fit the NeuralProphet model
-    model = NeuralProphet()
-    model.fit(df, freq='D', progress='silent')
-    
-    # Create a future dataframe and predict
-    future = model.make_future_dataframe(df, periods=periods)
+        st.error("Forecast end date must be after the last observed date for daily forecast.")
+        return None, last_date
+
+    # Fit the Prophet model
+    model = Prophet()
+    model.fit(df)
+    future = model.make_future_dataframe(periods=periods, freq='D')
     forecast = model.predict(future)
     
-    # NeuralProphet outputs predictions in the 'yhat1' column; rename for consistency
-    if 'yhat1' in forecast.columns:
-        forecast = forecast.rename(columns={'yhat1': 'yhat'})
-    
-    # Plot actual vs. forecasted sessions
+    # Plot actual vs. forecast
     fig, ax = plt.subplots(figsize=(16, 8))
     ax.plot(df['ds'], df['y'], label='Actual', color='blue')
     ax.plot(forecast['ds'], forecast['yhat'], label='Forecast', color='green')
@@ -72,19 +61,19 @@ def forecast_daily_neuralprophet(df, forecast_end_date):
         mid_date = start_date + (end_date - start_date) / 2
         ax.text(mid_date, ax.get_ylim()[1], label, ha='center', va='top', fontsize=9)
     
-    ax.set_title('Daily Forecast (NeuralProphet)')
+    ax.set_title('Daily Actual vs. Forecasted GA4 Sessions with Google Update Ranges')
     ax.set_xlabel('Date')
     ax.set_ylabel('Sessions')
     ax.legend()
     st.pyplot(fig)
     
-    return forecast, last_date, df
+    return forecast, last_date
 
 def display_dashboard(forecast, last_date, forecast_end_date):
     st.subheader("Forecast Data Table")
-    # Show forecast rows between the last observed date and the selected forecast end date
+    # Display forecast rows between the last observed date and the forecast end date
     forecast_filtered = forecast[(forecast['ds'] > last_date) & (forecast['ds'] <= forecast_end_date)]
-    st.dataframe(forecast_filtered[['ds', 'yhat']])
+    st.dataframe(forecast_filtered[['ds', 'yhat', 'yhat_lower', 'yhat_upper']])
     
     # Calculate forecast horizon
     horizon = (forecast_end_date - last_date).days
@@ -99,12 +88,14 @@ def display_dashboard(forecast, last_date, forecast_end_date):
         return
     closest_idx = (forecast_future['ds'] - forecast_end_date).abs().idxmin()
     forecast_value = forecast_future.loc[closest_idx]
-    st.metric(label="Forecasted Traffic", value=int(forecast_value['yhat']))
+    st.metric(label="Forecasted Traffic", value=int(forecast_value['yhat']),
+              delta=f"Range: {int(forecast_value['yhat_upper'] - forecast_value['yhat_lower'])}")
     
     # Year-over-Year Calculation
     start_forecast = last_date + pd.Timedelta(days=1)
     end_forecast = forecast_end_date
     current_period = forecast[(forecast['ds'] >= start_forecast) & (forecast['ds'] <= end_forecast)]
+    # Define the corresponding period one year earlier
     start_prev = start_forecast - pd.Timedelta(days=365)
     end_prev = end_forecast - pd.Timedelta(days=365)
     prev_period = forecast[(forecast['ds'] >= start_prev) & (forecast['ds'] <= end_prev)]
@@ -124,29 +115,30 @@ def display_dashboard(forecast, last_date, forecast_end_date):
         st.write("Not enough data for Year-over-Year calculation.")
 
 def main():
-    st.title("GA4 Daily Forecasting with NeuralProphet")
+    st.title("GA4 Daily Forecasting with Prophet")
     st.write("""
-        This app loads GA4 data, fits a NeuralProphet model to forecast daily sessions,
+        This app loads GA4 data, fits a Prophet model to forecast daily sessions,
         and displays actual vs. forecasted traffic with shaded Google update ranges.
         A summary dashboard with a year-over-year comparison is provided below.
+        The CSV file must have a column for "Date" and one for "Sessions". Date should be sorted by oldest date first.
     """)
     
-    # Sidebar: select forecast end date
+    # Sidebar: set forecast end date
     default_forecast_end = (pd.Timestamp.today() + timedelta(days=90)).date()
     forecast_end_date_input = st.sidebar.date_input("Select Forecast End Date", value=default_forecast_end)
     forecast_end_date = pd.to_datetime(forecast_end_date_input)
     
-    # Load GA4 data from CSV file
+    # Load GA4 data
     df = load_data()
     if df is not None:
         st.subheader("Data Preview")
         st.dataframe(df.head())
         
-        forecast, last_date, _ = forecast_daily_neuralprophet(df.copy(), forecast_end_date)
+        forecast, last_date = plot_daily_forecast(df.copy(), forecast_end_date)
         if forecast is not None:
             display_dashboard(forecast, last_date, forecast_end_date)
             
-            # Option to download the full forecast as CSV
+            # Option to download the full forecast numbers as CSV
             csv_data = forecast.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="Download Full Forecast CSV",
@@ -155,7 +147,8 @@ def main():
                 mime='text/csv'
             )
     
-    st.markdown("[Created by The SEO Consultant.ai](https://theseoconsultant.ai/)")
+    # Footer link
+    st.markdown("Created by [The SEO Consultant.ai](https://theseoconsultant.ai/)")
 
 if __name__ == "__main__":
     main()
