@@ -1,53 +1,25 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates # <-- ADDED MATPLOTLIB DATES IMPORT
 from neuralprophet import NeuralProphet, set_log_level
 from datetime import timedelta
 import logging
-# NOTE: Since PyTorch was downgraded (e.g., to <2.6), the lengthy
-#       'add_safe_globals' section and its imports are likely no longer
-#       needed and can be commented out or removed if desired.
-#       Keeping them doesn't hurt, but they won't be used by older PyTorch.
+# NOTE: Safe globals section is likely inactive with older PyTorch
+# You can leave it commented or remove it
 # import torch
 # from torch import serialization
-# from torch.nn import SmoothL1Loss
-# from torch.optim import AdamW
-# from torch.optim.lr_scheduler import OneCycleLR
-# from numpy.core.multiarray import _reconstruct
-# from numpy import ndarray, dtype, float64
-# from numpy.dtypes import Float64DType
-# from neuralprophet.configure import ConfigSeasonality, Season, Train, Trend, AR
-# from neuralprophet.custom_loss_metrics import PinballLoss
+# ... other imports for safe_globals ...
 
 # --- MOVE st.set_page_config() HERE ---
 st.set_page_config(layout="wide", page_title="GA4 Forecaster (NeuralProphet)")
 
 # Optional: Suppress excessive logging from NeuralProphet during training
 set_log_level("ERROR")
-# logging.getLogger("NP").setLevel(logging.ERROR) # Alternative way
 
 # --- Allowlist section (likely inactive with older PyTorch) ---
 ADD_SAFE_GLOBALS_MESSAGE = "Info: Using older PyTorch version, safe_globals allowlisting may not be active."
-# try:
-#     safe_globals_list = [
-#         ConfigSeasonality, Season, Train, Trend, AR, PinballLoss,
-#         SmoothL1Loss, AdamW, OneCycleLR, _reconstruct,
-#         ndarray, dtype, float64, Float64DType ]
-#     # Check if serialization and add_safe_globals exist before calling
-#     if 'serialization' in globals() and hasattr(serialization, 'add_safe_globals'):
-#          serialization.add_safe_globals(safe_globals_list)
-#          ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} items to torch safe globals (may be ignored by older PyTorch)."
-# except NameError:
-#      # One of the imports failed, likely because torch wasn't imported fully above
-#      ADD_SAFE_GLOBALS_MESSAGE = "Warning: Could not perform safe_globals setup (likely due to older PyTorch)."
-# except AttributeError:
-#     ADD_SAFE_GLOBALS_MESSAGE = "Info: torch.serialization.add_safe_globals not used (older PyTorch version)."
-# except ImportError as imp_err:
-#     ADD_SAFE_GLOBALS_MESSAGE = f"Warning: Could not import one or more necessary items for torch compatibility: {imp_err}"
-# except Exception as e:
-#     ADD_SAFE_GLOBALS_MESSAGE = f"Warning: An unexpected error occurred while adding safe globals for torch: {e}"
-# --- End of allowlist section ---
-
+# ...(rest of commented out or active safe_globals block)...
 
 def load_data():
     """Loads GA4 data from an uploaded CSV file."""
@@ -174,20 +146,16 @@ def plot_daily_forecast(df, forecast_end_date):
     ax.plot(forecast['ds'], forecast['yhat1'], label='Forecast (yhat1)', color='green', linestyle='--')
 
     # Plot uncertainty intervals using quantile columns
-    # --- MODIFICATION: Hardcode column names ---
-    # Using older PyTorch might change how NP exposes attributes.
-    # We hardcode based on the known quantiles=[0.05, 0.95] used in initialization.
     lower_q_col = 'yhat1 5.0%'
     upper_q_col = 'yhat1 95.0%'
-    uncertainty_label = 'Uncertainty Interval (90%)' # Corresponds to 0.95 - 0.05
-    # --- END MODIFICATION ---
+    uncertainty_label = 'Uncertainty Interval (90%)'
 
     if lower_q_col in forecast.columns and upper_q_col in forecast.columns:
         ax.fill_between(forecast['ds'],
                         forecast[lower_q_col],
                         forecast[upper_q_col],
                         color='green', alpha=0.2,
-                        label=uncertainty_label) # Use the fixed label
+                        label=uncertainty_label)
     else:
         st.warning(f"Could not find uncertainty columns: '{lower_q_col}', '{upper_q_col}'. Plotting without intervals.")
 
@@ -198,25 +166,38 @@ def plot_daily_forecast(df, forecast_end_date):
         ('20231102', '20231204', 'Nov 23 Core+Spam'), ('20240305', '20240419', 'Mar 24 Core'),
         ('20240506', '20240507', 'Site Rep Abuse'), ('20240514', '20240515', 'AI Overviews'),
         ('20240620', '20240627', 'Jun 24 Core'), ('20240815', '20240903', 'Aug 24 Core'),
+        # Add future dates back if needed, they were commented out before
         ('20241111', '20241205', 'Nov 24 Core'),
         ('20241212', '20241218', 'Dec 24 Core'),
         ('20241219', '20241226', 'Dec 24 Spam'),
         ('20250313', '20250327', 'Mar 25 Core')
     ]
-    # ...(rest of google update plotting code remains the same)...
     plot_bottom, plot_top = ax.get_ylim()
     text_y_pos = plot_top * 1.02
+    # Get x-axis limits *before* the loop
+    xlim_min, xlim_max = ax.get_xlim()
+
     for start_str, end_str, label in google_updates:
         try:
             start_date = pd.to_datetime(start_str, format='%Y%m%d')
             end_date = pd.to_datetime(end_str, format='%Y%m%d')
+            # This comparison should be fine (Timestamp vs Timestamp)
             if start_date <= forecast['ds'].max() and end_date >= df['ds'].min():
                 ax.axvspan(start_date, end_date, color='lightcoral', alpha=0.2)
                 mid_date = start_date + (end_date - start_date) / 2
-                if mid_date >= ax.get_xlim()[0] and mid_date <= ax.get_xlim()[1]:
+
+                # --- CONVERT AND COMPARE USING MATPLOTLIB NUMBERS ---
+                mid_date_num = mdates.date2num(mid_date)
+                # Compare the numerical date with the numerical axis limits
+                if mid_date_num >= xlim_min and mid_date_num <= xlim_max:
                      ax.text(mid_date, text_y_pos, label, ha='center', va='bottom', fontsize=8, rotation=90, color='dimgray')
+                # --- END CONVERSION AND COMPARISON ---
+
         except Exception as e:
+            # Use st.warning for non-critical plotting issues
             st.warning(f"Could not plot Google Update '{label}': {e}")
+
+    # Reset y-limits slightly expanded to ensure text fits if it was plotted
     ax.set_ylim(bottom=plot_bottom, top=text_y_pos * 1.05)
 
     ax.set_title('Daily Actual vs. Forecasted GA4 Sessions (NeuralProphet) with Google Update Ranges')
@@ -234,13 +215,9 @@ def display_dashboard(forecast, last_date, forecast_end_date):
     """Displays the forecast data table and summary metrics."""
     st.subheader("Forecast Data Table")
 
-    # --- MODIFICATION: Force fixed column names ---
-    # Based on known quantiles=[0.05, 0.95] used in initialization.
     lower_q_col = 'yhat1 5.0%'
     upper_q_col = 'yhat1 95.0%'
-    # --- END MODIFICATION ---
 
-    # Check if quantile columns exist, handle gracefully if not
     if lower_q_col not in forecast.columns:
         forecast[lower_q_col] = pd.NA
         st.warning(f"Column '{lower_q_col}' not found in forecast data.")
@@ -248,24 +225,19 @@ def display_dashboard(forecast, last_date, forecast_end_date):
         forecast[upper_q_col] = pd.NA
         st.warning(f"Column '{upper_q_col}' not found in forecast data.")
 
-    # Filter forecast for the future period
     forecast_filtered = forecast[(forecast['ds'] > last_date) & (forecast['ds'] <= forecast_end_date)].copy()
 
-    # Select and rename columns for display
     display_cols = ['ds', 'yhat1', lower_q_col, upper_q_col]
     display_cols = [col for col in display_cols if col in forecast_filtered.columns]
     forecast_display = forecast_filtered[display_cols]
 
-    # Rename after selection
     rename_map = {
         'yhat1': 'Forecast',
-        # Use the fixed names to generate labels correctly
         lower_q_col: f'Lower Bound ({lower_q_col.split(" ")[-1]})' if lower_q_col in forecast_display else 'Lower Bound',
         upper_q_col: f'Upper Bound ({upper_q_col.split(" ")[-1]})' if upper_q_col in forecast_display else 'Upper Bound'
     }
     forecast_display = forecast_display.rename(columns=rename_map)
 
-    # Format date column and numbers
     forecast_display['ds'] = forecast_display['ds'].dt.strftime('%Y-%m-%d')
     for col in forecast_display.columns:
         if col != 'ds' and pd.api.types.is_numeric_dtype(forecast_display[col]):
@@ -289,7 +261,6 @@ def display_dashboard(forecast, last_date, forecast_end_date):
 
     delta_val = pd.NA
     delta_str = "Range N/A"
-    # Use the fixed column names here too
     if pd.notna(forecast_value.get(lower_q_col)) and pd.notna(forecast_value.get(upper_q_col)):
          delta_val = forecast_value[upper_q_col] - forecast_value[lower_q_col]
          if pd.notna(delta_val):
@@ -340,7 +311,7 @@ def display_dashboard(forecast, last_date, forecast_end_date):
 def main():
     """Main function to run the Streamlit app."""
     if ADD_SAFE_GLOBALS_MESSAGE:
-        st.info(ADD_SAFE_GLOBALS_MESSAGE) # Display message about safe_globals status
+        st.info(ADD_SAFE_GLOBALS_MESSAGE)
 
     st.title("📊 GA4 Daily Forecasting with NeuralProphet")
     st.write("""
@@ -363,7 +334,6 @@ def main():
         help="Choose the date up to which you want to forecast." )
     forecast_end_date = pd.to_datetime(forecast_end_date_input)
     st.sidebar.markdown("---")
-    # Updated requirements list in sidebar info
     st.sidebar.info("Ensure `neuralprophet`, `torch<2.6`, `numpy`, `pandas`, `matplotlib`, and `streamlit` are installed.")
 
     # --- Main Area ---
@@ -387,7 +357,9 @@ def main():
             except Exception as e:
                 st.error(f"Failed to generate download file: {e}")
         else:
-            st.error("Forecasting could not be completed due to previous errors.")
+            # Avoid showing double error if fitting failed
+            # st.error("Forecasting could not be completed due to previous errors.")
+            pass # The error from plot_daily_forecast is already shown
 
     st.markdown("---")
     st.markdown("Created by [The SEO Consultant.ai](https://theseoconsultant.ai/)")
