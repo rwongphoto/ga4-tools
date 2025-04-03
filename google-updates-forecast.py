@@ -126,13 +126,29 @@ def plot_daily_forecast(df, forecast_end_date):
     df['Date'] = pd.to_datetime(df['Date'], format='%Y%m%d')
     df.rename(columns={'Date': 'ds', 'Sessions': 'y'}, inplace=True)
     last_date = df['ds'].max()
-    last_actual_value = df[df['ds'] == last_date]['y'].iloc[0] # Get last actual value
+    # Ensure last_actual_value is retrieved correctly, handle potential empty df edge case
+    if df.empty:
+         st.error("Input data is empty.")
+         return None, None, None, []
+    if last_date is pd.NaT:
+         st.error("Could not determine the last date from the data.")
+         return None, None, None, []
+
+    # Get last actual value robustly
+    last_row = df[df['ds'] == last_date]
+    if last_row.empty:
+        st.error(f"No data found for the last date {last_date}. Check data integrity.")
+        return None, last_date, None, []
+    last_actual_value = last_row['y'].iloc[0]
+
 
     # Compute forecast periods as the number of days from last observed date
     periods = (forecast_end_date - last_date).days
     if periods <= 0:
         st.error("Forecast end date must be after the last observed date for daily forecast.")
-        return None, last_date, None # Return None for last_actual_value on error
+        # Return google_updates as empty list here as well
+        google_updates = [] # Define google_updates even on error path if needed later
+        return None, last_date, last_actual_value, google_updates # Return last actual value if available
 
     model = Prophet()
     model.fit(df)
@@ -144,7 +160,7 @@ def plot_daily_forecast(df, forecast_end_date):
     ax.plot(df['ds'], df['y'], label='Actual', color='blue')
     ax.plot(forecast['ds'], forecast['yhat'], label='Forecast', color='green')
 
-    # Shade Google algorithm update ranges
+    # Define Google updates list (ensure it's defined before the loop)
     google_updates = [
         ('20230315', '20230328', 'Mar 2023 Core Update'),
         ('20230822', '20230907', 'Aug 2023 Core Update'),
@@ -161,12 +177,29 @@ def plot_daily_forecast(df, forecast_end_date):
         ('20241219', '20241226', 'Dec 2024 Spam Update'),
         ('20250313', '20250327', 'Mar 2025 Core Update')
     ]
+
+    # Shade Google algorithm update ranges
     for start_str, end_str, label in google_updates:
-        start_date = pd.to_datetime(start_str, format='%Y%m%d')
-        end_date = pd.to_datetime(end_str, format='%Y%m%d')
-        ax.axvspan(start_date, end_date, color='gray', alpha=0.2)
-        # Adjusted text placement slightly lower to avoid overlapping title too much
-        ax.text(mid_date, ax.get_ylim()[1] * 0.98, label, ha='center', va='top', fontsize=8, rotation=90) # Rotate text
+        try:
+            start_date = pd.to_datetime(start_str, format='%Y%m%d')
+            end_date = pd.to_datetime(end_str, format='%Y%m%d')
+
+            # --- FIX IS HERE: Calculate mid_date inside the loop ---
+            mid_date = start_date + (end_date - start_date) / 2
+            # --- End Fix ---
+
+            ax.axvspan(start_date, end_date, color='gray', alpha=0.2)
+            # Adjusted text placement slightly lower to avoid overlapping title too much
+            # Check if plot limits are valid before using them
+            y_limits = ax.get_ylim()
+            if y_limits and len(y_limits) == 2 and y_limits[1] > y_limits[0]:
+                 text_y_pos = y_limits[1] * 0.98
+            else: # Fallback if limits are weird
+                 text_y_pos = forecast['yhat'].max() * 0.98 # Use data max as fallback
+
+            ax.text(mid_date, text_y_pos, label, ha='center', va='top', fontsize=8, rotation=90) # Rotate text
+        except Exception as e:
+             st.warning(f"Could not plot Google update '{label}': {e}") # Warn instead of crashing
 
     ax.set_title('Daily Actual vs. Forecasted GA4 Sessions with Google Update Ranges')
     ax.set_xlabel('Date')
@@ -174,8 +207,8 @@ def plot_daily_forecast(df, forecast_end_date):
     ax.legend()
     st.pyplot(fig)
 
-    # Return the full forecast, last date, and last actual value
-    return forecast, last_date, last_actual_value, google_updates # Return updates too
+    # Return the full forecast, last date, last actual value, and the updates list used
+    return forecast, last_date, last_actual_value, google_updates
 
 # --- Similar modifications for plot_weekly_forecast and plot_monthly_forecast ---
 # Make sure they also return `last_actual_value` and the `google_updates` list.
