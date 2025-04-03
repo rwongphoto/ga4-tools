@@ -212,28 +212,6 @@ def display_dashboard(forecast, last_date, forecast_end_date, forecast_type):
     st.write(f"Forecast Horizon: {horizon_str}")
     st.metric(label="Forecasted Traffic", value=int(forecast_value['yhat']),
               delta=f"{int(forecast_value['yhat_upper'] - forecast_value['yhat_lower'])} range")
-    
-    # Year-over-Year Calculation
-    start_forecast = last_date + pd.Timedelta(days=1)
-    end_forecast = forecast_end_date
-    current_period = forecast[(forecast['ds'] >= start_forecast) & (forecast['ds'] <= end_forecast)]
-    # Define the corresponding period one year earlier
-    start_prev = start_forecast - pd.Timedelta(days=365)
-    end_prev = end_forecast - pd.Timedelta(days=365)
-    prev_period = forecast[(forecast['ds'] >= start_prev) & (forecast['ds'] <= end_prev)]
-    if not current_period.empty and not prev_period.empty:
-        current_sum = current_period['yhat'].sum()
-        prev_sum = prev_period['yhat'].sum()
-        if prev_sum != 0:
-            yoy_change = ((current_sum - prev_sum) / prev_sum) * 100
-        else:
-            yoy_change = float('inf')
-        st.subheader("Year-over-Year Comparison")
-        st.write(f"Total Forecasted Traffic for Selected Period: {current_sum:.0f}")
-        st.write(f"Total Traffic for Same Period Last Year: {prev_sum:.0f}")
-        st.write(f"Year-over-Year Change: {yoy_change:.2f}%")
-    else:
-        st.write("Not enough data for Year-over-Year calculation.")
 
 def main():
     st.title("GA4 Forecasting with Prophet")
@@ -241,7 +219,7 @@ def main():
         This app loads GA4 data, fits a Prophet model to forecast future sessions,
         and displays actual vs. forecasted traffic with shaded Google update ranges.
         Choose a forecast type (Daily, Weekly, or Monthly) and select a forecast end date.
-        A table, summary dashboard, and a year-over-year comparison are provided underneath the chart.
+        A table and summary dashboard are provided underneath the chart.
     """)
     
     # Sidebar: choose forecast type and set forecast end date
@@ -264,9 +242,6 @@ def main():
         
         if forecast is not None:
             display_dashboard(forecast, last_date, forecast_end_date, forecast_type)
-    
-    # Footer link
-    st.markdown("[Created by The SEO Consultant.ai](https://theseoconsultant.ai/)")
 
 if __name__ == "__main__":
     main()
