@@ -242,6 +242,9 @@ def main():
         
         if forecast is not None:
             display_dashboard(forecast, last_date, forecast_end_date, forecast_type)
-
+            
+    st.markdown("---")
+    st.markdown("Created by [The SEO Consultant.ai](https://theseoconsultant.ai/)")
+    
 if __name__ == "__main__":
     main()
