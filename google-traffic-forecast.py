@@ -11,36 +11,31 @@ from torch import serialization # Import serialization module
 # If other errors appear later mentioning different classes, add them here.
 from neuralprophet.configure import ConfigSeasonality
 
+# --- MOVE st.set_page_config() HERE ---
+# Must be the first Streamlit command executed
+st.set_page_config(layout="wide", page_title="GA4 Forecaster (NeuralProphet)")
+
 # Optional: Suppress excessive logging from NeuralProphet during training
 set_log_level("ERROR")
-# You can also try "WARNING" or "INFO" if you want some feedback
 # logging.getLogger("NP").setLevel(logging.ERROR) # Alternative way
 
 
 # --- Add this section to allowlist necessary classes for torch.load ---
 # This addresses the "Weights only load failed" error with PyTorch 2.6+.
+# Keep the logic, but remove direct Streamlit calls from global scope
+ADD_SAFE_GLOBALS_MESSAGE = "" # Store message instead of printing directly
 try:
-    # Add classes that might be pickled/unpickled by NeuralProphet internally.
-    # Start with the one from the original error message.
     safe_globals_list = [ConfigSeasonality]
-    # If future errors mention other classes (e.g., ConfigTrend, ConfigLags),
-    # import them above and add them to this list:
-    # Example:
-    # from neuralprophet.configure import ConfigSeasonality, ConfigTrend
-    # safe_globals_list = [ConfigSeasonality, ConfigTrend]
-
     serialization.add_safe_globals(safe_globals_list)
-    # Using st.text for less intrusive message compared to print in Streamlit context
-    st.text(f"Info: Added {len(safe_globals_list)} class(es) to torch safe globals for compatibility.")
+    # Store message to show later inside main()
+    ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es) to torch safe globals for compatibility."
 
 except AttributeError:
-    # Handle cases where serialization.add_safe_globals might not exist (e.g., older PyTorch)
-    st.text("Info: torch.serialization.add_safe_globals not used (likely older PyTorch version).")
+    ADD_SAFE_GLOBALS_MESSAGE = "Info: torch.serialization.add_safe_globals not used (likely older PyTorch version)."
 except ImportError:
-    st.warning("Warning: Could not import necessary NeuralProphet configure classes for torch.")
+    ADD_SAFE_GLOBALS_MESSAGE = "Warning: Could not import necessary NeuralProphet configure classes for torch."
 except Exception as e:
-    # Catch any other unexpected errors during the process
-    st.warning(f"Warning: An unexpected error occurred while adding safe globals for torch: {e}")
+    ADD_SAFE_GLOBALS_MESSAGE = f"Warning: An unexpected error occurred while adding safe globals for torch: {e}"
 # --- End of allowlist section ---
 
 
@@ -377,7 +372,15 @@ def display_dashboard(forecast, last_date, forecast_end_date):
 
 def main():
     """Main function to run the Streamlit app."""
-    st.set_page_config(layout="wide", page_title="GA4 Forecaster (NeuralProphet)") # Set page config
+    # --- Page Config moved to top ---
+
+    # Display the stored message from the add_safe_globals block
+    if ADD_SAFE_GLOBALS_MESSAGE:
+        if "Warning" in ADD_SAFE_GLOBALS_MESSAGE:
+            st.warning(ADD_SAFE_GLOBALS_MESSAGE)
+        else:
+            st.info(ADD_SAFE_GLOBALS_MESSAGE) # Use info for non-warning messages
+
     st.title("📊 GA4 Daily Forecasting with NeuralProphet")
     st.write("""
         Upload your Google Analytics 4 daily sessions data (CSV) to generate a forecast using NeuralProphet.
