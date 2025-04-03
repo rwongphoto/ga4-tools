@@ -6,44 +6,58 @@ from datetime import timedelta
 import logging
 import torch # Import torch
 from torch import serialization # Import serialization module
-# Import the specific class mentioned in the error
-from neuralprophet.configure import ConfigSeasonality, ConfigLags # Added ConfigLags as it might be needed too
 
-# Optional: Suppress excessive logging
+# Import ONLY the specific class mentioned in the ORIGINAL torch.load error
+# If other errors appear later mentioning different classes, add them here.
+from neuralprophet.configure import ConfigSeasonality
+
+# Optional: Suppress excessive logging from NeuralProphet during training
 set_log_level("ERROR")
+# You can also try "WARNING" or "INFO" if you want some feedback
+# logging.getLogger("NP").setLevel(logging.ERROR) # Alternative way
 
-# --- Add this section ---
-# Allowlist necessary NeuralProphet classes for torch.load with weights_only=True (PyTorch 2.6+)
-# This addresses the "Weights only load failed" error.
+
+# --- Add this section to allowlist necessary classes for torch.load ---
+# This addresses the "Weights only load failed" error with PyTorch 2.6+.
 try:
-    # Add classes that might be pickled/unpickled by NeuralProphet internally
-    # Start with the one from the error, add others if new errors appear.
+    # Add classes that might be pickled/unpickled by NeuralProphet internally.
+    # Start with the one from the original error message.
     safe_globals_list = [ConfigSeasonality]
-    # It's possible other config classes might be needed depending on model config/internal state
-    # Example: from neuralprophet.configure import ConfigTrend, ConfigLags, ConfigAr
-    # safe_globals_list.extend([ConfigTrend, ConfigLags, ConfigAr]) # Uncomment/add as needed
+    # If future errors mention other classes (e.g., ConfigTrend, ConfigLags),
+    # import them above and add them to this list:
+    # Example:
+    # from neuralprophet.configure import ConfigSeasonality, ConfigTrend
+    # safe_globals_list = [ConfigSeasonality, ConfigTrend]
 
     serialization.add_safe_globals(safe_globals_list)
-    print(f"Successfully added {len(safe_globals_list)} NeuralProphet class(es) to torch safe globals.")
+    # Using st.text for less intrusive message compared to print in Streamlit context
+    st.text(f"Info: Added {len(safe_globals_list)} class(es) to torch safe globals for compatibility.")
+
 except AttributeError:
     # Handle cases where serialization.add_safe_globals might not exist (e.g., older PyTorch)
-    print("Note: torch.serialization.add_safe_globals not found or not needed for this PyTorch version.")
+    st.text("Info: torch.serialization.add_safe_globals not used (likely older PyTorch version).")
 except ImportError:
-    print("Warning: Could not import necessary NeuralProphet configure classes.")
+    st.warning("Warning: Could not import necessary NeuralProphet configure classes for torch.")
 except Exception as e:
     # Catch any other unexpected errors during the process
-    st.warning(f"An unexpected error occurred while adding safe globals for torch: {e}")
-# --- End of added section ---
+    st.warning(f"Warning: An unexpected error occurred while adding safe globals for torch: {e}")
+# --- End of allowlist section ---
 
 
 def load_data():
+    """Loads GA4 data from an uploaded CSV file."""
     uploaded_file = st.file_uploader("Choose a GA4 CSV file", type="csv")
     if uploaded_file is not None:
         try:
             df = pd.read_csv(uploaded_file)
+            # Basic validation for required columns
             if 'Date' not in df.columns or 'Sessions' not in df.columns:
                 st.error("CSV must contain 'Date' and 'Sessions' columns.")
                 return None
+            # Additional check for empty dataframe after load
+            if df.empty:
+                 st.error("Uploaded CSV file is empty.")
+                 return None
             return df
         except Exception as e:
             st.error(f"Error reading CSV file: {e}")
@@ -53,94 +67,142 @@ def load_data():
         return None
 
 def plot_daily_forecast(df, forecast_end_date):
+    """
+    Fits a NeuralProphet model and plots the actual vs forecasted sessions.
+
+    Args:
+        df (pd.DataFrame): DataFrame with historical data ('Date', 'Sessions').
+        forecast_end_date (pd.Timestamp): The date to forecast up to.
+
+    Returns:
+        tuple: (forecast_df, last_date) or (None, None) on error.
+    """
     try:
+        # Convert 'Date' column from string format (YYYYMMDD) to datetime
         df['Date'] = pd.to_datetime(df['Date'], format='%Y%m%d')
     except ValueError:
         st.error("Error parsing 'Date' column. Ensure it's in YYYYMMDD format.")
         return None, None
+    except KeyError:
+         st.error("CSV file must contain a 'Date' column.") # Added check
+         return None, None
     except Exception as e:
          st.error(f"An error occurred during date conversion: {e}")
          return None, None
 
+    # Ensure 'Sessions' column exists before renaming
+    if 'Sessions' not in df.columns:
+        st.error("CSV file must contain a 'Sessions' column.")
+        return None, None
+
+    # Sort by date just in case
     df = df.sort_values('Date')
+
+    # Rename columns for NeuralProphet ('ds' for date, 'y' for target)
     df.rename(columns={'Date': 'ds', 'Sessions': 'y'}, inplace=True)
+
+    # Convert 'y' column to numeric, coercing errors (like non-numeric values) to NaN
+    df['y'] = pd.to_numeric(df['y'], errors='coerce')
+
+    # Drop rows where 'ds' or 'y' might be NaN (e.g., after coercion or if originally missing)
+    initial_rows = len(df)
     df.dropna(subset=['ds', 'y'], inplace=True)
+    dropped_rows = initial_rows - len(df)
+    if dropped_rows > 0:
+        st.warning(f"Dropped {dropped_rows} rows with missing dates or non-numeric session values.")
+
     if df.empty:
-        st.error("No valid data remaining after processing.")
+        st.error("No valid data remaining after processing (check for missing dates or non-numeric sessions).")
         return None, None
 
     last_date = df['ds'].max()
+
+    # Calculate forecast periods as the number of days from the last observed date
     periods = (forecast_end_date - last_date).days
     if periods <= 0:
-        st.error("Forecast end date must be after the last observed date.")
+        st.error("Forecast end date must be after the last observed date in the data.")
+        # Provide more context
+        st.error(f"Last observed date: {last_date.date()}. Selected end date: {forecast_end_date.date()}")
         return None, last_date
 
-    # Initialize NeuralProphet model
-    # Adding n_lags based on typical daily data patterns (e.g., look back 7 days)
-    # You might need to adjust n_lags based on your specific data patterns
-    # If n_lags > 0, you might need ConfigLags in the safe_globals list above
+    # --- NeuralProphet Section ---
+    # Initialize the NeuralProphet model
     model = NeuralProphet(
         yearly_seasonality=True,
         weekly_seasonality=True,
-        daily_seasonality=False,
-        # n_lags=7, # Example: Add autoregression - uncomment if desired
-        quantiles=[0.05, 0.95]
+        daily_seasonality=False, # Usually not needed/helpful for daily website traffic
+        # n_lags=7, # Example: Uncomment to add Autoregression (might need more data)
+        quantiles=[0.05, 0.95] # For 90% uncertainty intervals
     )
-    # If using n_lags > 0, ensure ConfigLags is imported and added to safe_globals
-    # from neuralprophet.configure import ConfigLags
-    # serialization.add_safe_globals([ConfigSeasonality, ConfigLags]) # Example
 
-    st.info("Training NeuralProphet model...")
+    st.info("Training NeuralProphet model... this may take a few moments.")
     progress_bar = st.progress(0)
+    forecast = None # Initialize forecast variable
+
     try:
-        # Ensure df has enough data points if using lags or validation split
-        min_data_points = 14 # Arbitrary minimum, adjust as needed
-        if model.n_lags:
-             min_data_points = max(min_data_points, model.n_lags + 7) # Need enough data for lags + buffer
+        # Check for minimum data points for reliable seasonality/fitting
+        min_data_points = 30 # Increased minimum recommendation
+        if hasattr(model, 'n_lags') and model.n_lags > 0:
+             min_data_points = max(min_data_points, model.n_lags * 2 + 14) # Heuristic if lags are used
 
         if len(df) < min_data_points:
-             st.warning(f"Dataset has only {len(df)} points. Consider using more data for better results, especially if using lags.")
-             # Proceeding anyway, but model quality might be affected
-             df_train = df # Use all data for training if too small to split
+             st.warning(f"Dataset has only {len(df)} data points (recommended: {min_data_points}+). "
+                        "Model results might be less reliable. Consider using more historical data.")
+             # Use all data for training if too small to split reliably
+             df_train = df
              metrics = model.fit(df_train, freq="D")
+             progress_bar.progress(50)
 
         else:
-            df_train, df_val = model.split_df(df, freq="D", valid_p=0.1)
-            metrics = model.fit(df_train, freq="D") # Fit on training data
-            # Optional: Evaluate on validation set
-            # val_metrics = model.test(df_val)
-            # st.write("Model Validation Metrics:")
-            # st.write(val_metrics)
+            # Split data for metrics, fit model
+            df_train, df_val = model.split_df(df, freq="D", valid_p=0.1) # Use last 10% for validation
+            st.write(f"Training on {len(df_train)} data points, validating on {len(df_val)}.")
+            metrics = model.fit(df_train, freq="D") # Fit on training data only
+            progress_bar.progress(50) # Mid-point after fitting
+            # Optional: Evaluate on validation set and display
+            try:
+                val_metrics = model.test(df_val)
+                st.write("Model Validation Metrics (on held-out 10% data):")
+                st.dataframe(val_metrics)
+            except Exception as test_e:
+                st.warning(f"Could not compute validation metrics: {test_e}")
 
 
-        progress_bar.progress(50) # Mid-point after fitting
-        st.write("Model Training Metrics:")
-        st.write(metrics)
+        st.write("Model Training Metrics (on training data):")
+        st.dataframe(metrics) # Display training metrics
 
         # Create future dataframe & predict
-        future = model.make_future_dataframe(df=df, periods=periods)
+        future = model.make_future_dataframe(df=df, periods=periods) # Pass original df for continuity
         progress_bar.progress(75)
         forecast = model.predict(future)
-        progress_bar.progress(100)
+        progress_bar.progress(100) # Mark as complete
 
     except Exception as e:
         st.error(f"Error during NeuralProphet fitting or prediction: {e}")
         # Print detailed traceback to console for debugging if running locally
         import traceback
         traceback.print_exc()
-        progress_bar.progress(100)
+        progress_bar.progress(100) # Ensure progress bar finishes on error
         return None, last_date
+    # --- End NeuralProphet Section ---
 
+
+    # Check if forecast is empty or missing essential columns
     if forecast is None or forecast.empty or 'ds' not in forecast.columns or 'yhat1' not in forecast.columns:
          st.error("Prediction failed or returned unexpected results.")
          return None, last_date
 
-    # --- Plotting Section (Adjusted for NeuralProphet output) ---
+    # --- Plotting Section ---
     fig, ax = plt.subplots(figsize=(16, 8))
-    ax.plot(df['ds'], df['y'], label='Actual', color='blue', marker='.', linestyle='-')
 
-    ax.plot(forecast['ds'], forecast['yhat1'], label='Forecast (yhat1)', color='green')
+    # Plot actual data
+    ax.plot(df['ds'], df['y'], label='Actual', color='blue', marker='.', markersize=4, linestyle='-')
 
+    # Plot forecast line using 'yhat1'
+    ax.plot(forecast['ds'], forecast['yhat1'], label='Forecast (yhat1)', color='green', linestyle='--')
+
+    # Plot uncertainty intervals using quantile columns
+    # Dynamically get quantile column names based on model's quantiles attribute
     lower_q_col = f'yhat1 {model.quantiles[0]*100:.1f}%'
     upper_q_col = f'yhat1 {model.quantiles[1]*100:.1f}%'
 
@@ -148,181 +210,241 @@ def plot_daily_forecast(df, forecast_end_date):
         ax.fill_between(forecast['ds'],
                         forecast[lower_q_col],
                         forecast[upper_q_col],
-                        color='green', alpha=0.2, label='Uncertainty Interval (90%)')
+                        color='green', alpha=0.2, label=f'Uncertainty Interval ({int(model.quantiles[1]*100-model.quantiles[0]*100)}%)')
     else:
         st.warning(f"Could not find uncertainty columns: '{lower_q_col}', '{upper_q_col}'. Plotting without intervals.")
 
-    # --- Google Update Shading ---
+    # --- Google Update Shading (No changes needed here) ---
     google_updates = [
-        ('20230315', '20230328', 'Mar 2023 Core Update'), ('20230822', '20230907', 'Aug 2023 Core Update'),
-        ('20230914', '20230928', 'Sept 2023 Helpful Content'), ('20231004', '20231019', 'Oct 2023 Core & Spam'),
-        ('20231102', '20231204', 'Nov 2023 Core & Spam'), ('20240305', '20240419', 'Mar 2024 Core Update'),
+        ('20230315', '20230328', 'Mar 23 Core'), ('20230822', '20230907', 'Aug 23 Core'),
+        ('20230914', '20230928', 'Sep 23 Helpful'), ('20231004', '20231019', 'Oct 23 Core+Spam'),
+        ('20231102', '20231204', 'Nov 23 Core+Spam'), ('20240305', '20240419', 'Mar 24 Core'),
         ('20240506', '20240507', 'Site Rep Abuse'), ('20240514', '20240515', 'AI Overviews'),
-        ('20240620', '20240627', 'June 2024 Core'), ('20240815', '20240903', 'Aug 2024 Core'),
-        ('20241111', '20241205', 'Nov 2024 Core'), ('20241212', '20241218', 'Dec 2024 Core'),
-        ('20241219', '20241226', 'Dec 2024 Spam'), ('20250313', '20250327', 'Mar 2025 Core')
+        ('20240620', '20240627', 'Jun 24 Core'), ('20240815', '20240903', 'Aug 24 Core'),
+        # ('20241111', '20241205', 'Nov 24 Core'), # Future dates commented out
+        # ('20241212', '20241218', 'Dec 24 Core'),
+        # ('20241219', '20241226', 'Dec 24 Spam'),
+        # ('20250313', '20250327', 'Mar 25 Core')
     ]
-    plot_bottom, plot_top = ax.get_ylim()
+    plot_bottom, plot_top = ax.get_ylim() # Get current y-limits *before* adding text
+    text_y_pos = plot_top * 1.02 # Position text slightly above current max y
+
     for start_str, end_str, label in google_updates:
         try:
             start_date = pd.to_datetime(start_str, format='%Y%m%d')
             end_date = pd.to_datetime(end_str, format='%Y%m%d')
-            ax.axvspan(start_date, end_date, color='gray', alpha=0.15) # Slightly lighter alpha
-            mid_date = start_date + (end_date - start_date) / 2
-            # Rotate text and place slightly above data max
-            text_y_pos = plot_top * 1.01 # Place text just above the max y-limit
-            ax.text(mid_date, text_y_pos, label, ha='center', va='bottom', fontsize=8, rotation=90)
+            # Only plot if the update range overlaps with the plotted date range
+            if start_date <= forecast['ds'].max() and end_date >= df['ds'].min():
+                ax.axvspan(start_date, end_date, color='lightcoral', alpha=0.2) # Changed color slightly
+                mid_date = start_date + (end_date - start_date) / 2
+                # Plot text only if it falls within the x-axis limits
+                if mid_date >= ax.get_xlim()[0] and mid_date <= ax.get_xlim()[1]:
+                     ax.text(mid_date, text_y_pos, label, ha='center', va='bottom', fontsize=8, rotation=90, color='dimgray')
         except Exception as e:
             st.warning(f"Could not plot Google Update '{label}': {e}")
 
-    # Adjust y-limits after adding text to ensure visibility
-    final_bottom, final_top = ax.get_ylim()
-    ax.set_ylim(final_bottom, final_top * 1.1) # Add 10% padding at the top for text
+    # Reset y-limits slightly expanded to ensure text fits if it was plotted
+    ax.set_ylim(bottom=plot_bottom, top=text_y_pos * 1.05) # Add padding above text
 
     ax.set_title('Daily Actual vs. Forecasted GA4 Sessions (NeuralProphet) with Google Update Ranges')
     ax.set_xlabel('Date')
     ax.set_ylabel('Sessions')
-    ax.legend(loc='upper left') # Adjust legend position if needed
-    plt.tight_layout()
+    ax.legend(loc='upper left')
+    ax.grid(True, linestyle='--', alpha=0.6) # Add grid for readability
+    plt.tight_layout() # Adjust layout to prevent labels overlapping
     st.pyplot(fig)
 
     return forecast, last_date
 
 
 def display_dashboard(forecast, last_date, forecast_end_date):
+    """Displays the forecast data table and summary metrics."""
     st.subheader("Forecast Data Table")
 
     # Dynamically get quantile column names based on model's actual quantiles
-    if hasattr(forecast, 'columns'):
-        q_cols = [col for col in forecast.columns if '%' in col and 'yhat1' in col]
-        lower_q_col = q_cols[0] if len(q_cols) > 0 else 'yhat1 5.0%' # Fallback default
-        upper_q_col = q_cols[-1] if len(q_cols) > 0 else 'yhat1 95.0%' # Fallback default
-    else: # Fallback if forecast object isn't as expected
-        lower_q_col = 'yhat1 5.0%'
-        upper_q_col = 'yhat1 95.0%'
+    lower_q_col = f'yhat1 {forecast.columns[forecast.columns.str.contains("%")][0].split(" ")[-1]}' if any('%' in col and 'yhat1' in col for col in forecast.columns) else 'yhat1 5.0%'
+    upper_q_col = f'yhat1 {forecast.columns[forecast.columns.str.contains("%")][-1].split(" ")[-1]}' if any('%' in col and 'yhat1' in col for col in forecast.columns) else 'yhat1 95.0%'
 
-    # Check if quantile columns exist
+
+    # Check if quantile columns exist, handle gracefully if not
     if lower_q_col not in forecast.columns:
-        forecast[lower_q_col] = None
+        forecast[lower_q_col] = pd.NA # Use pandas NA for consistency
         st.warning(f"Column '{lower_q_col}' not found in forecast data.")
     if upper_q_col not in forecast.columns:
-        forecast[upper_q_col] = None
+        forecast[upper_q_col] = pd.NA
         st.warning(f"Column '{upper_q_col}' not found in forecast data.")
 
-    forecast_filtered = forecast[(forecast['ds'] > last_date) & (forecast['ds'] <= forecast_end_date)]
-    display_cols = ['ds', 'yhat1', lower_q_col, upper_q_col]
-    forecast_display = forecast_filtered[display_cols].rename(columns={
-        'yhat1': 'Forecast',
-        lower_q_col: f'Lower Bound ({lower_q_col.split(" ")[-1]})', # Dynamic label
-        upper_q_col: f'Upper Bound ({upper_q_col.split(" ")[-1]})'  # Dynamic label
-    })
-    # Format date column for better readability
-    forecast_display['ds'] = forecast_display['ds'].dt.strftime('%Y-%m-%d')
-    st.dataframe(forecast_display)
 
-    horizon = (forecast_end_date - last_date).days
+    # Filter forecast for the future period
+    forecast_filtered = forecast[(forecast['ds'] > last_date) & (forecast['ds'] <= forecast_end_date)].copy() # Use copy to avoid SettingWithCopyWarning
+
+    # Select and rename columns for display
+    display_cols = ['ds', 'yhat1', lower_q_col, upper_q_col]
+    # Ensure all display columns exist before selecting
+    display_cols = [col for col in display_cols if col in forecast_filtered.columns]
+    forecast_display = forecast_filtered[display_cols]
+
+    # Rename after selection
+    rename_map = {
+        'yhat1': 'Forecast',
+        lower_q_col: f'Lower Bound ({lower_q_col.split(" ")[-1]})' if lower_q_col in forecast_display else 'Lower Bound',
+        upper_q_col: f'Upper Bound ({upper_q_col.split(" ")[-1]})' if upper_q_col in forecast_display else 'Upper Bound'
+    }
+    forecast_display = forecast_display.rename(columns=rename_map)
+
+    # Format date column and numbers for better readability
+    forecast_display['ds'] = forecast_display['ds'].dt.strftime('%Y-%m-%d')
+    # Format numeric columns (handle potential NAs)
+    for col in forecast_display.columns:
+        if col != 'ds' and pd.api.types.is_numeric_dtype(forecast_display[col]):
+             forecast_display[col] = forecast_display[col].map('{:,.0f}'.format, na_action='ignore') # Format as integer with comma
+
+    st.dataframe(forecast_display, use_container_width=True) # Use full width
+
+    # --- Forecast Summary ---
     st.subheader("Forecast Summary")
+    horizon = (forecast_end_date - last_date).days
     st.write(f"Forecast End Date: {forecast_end_date.date()}")
     st.write(f"Forecast Horizon: {horizon} days")
 
+    # Get the forecast row closest to the forecast end date
     forecast_future = forecast[forecast['ds'] > last_date]
     if forecast_future.empty:
-        st.write("No forecast data available for the selected date range.")
-        return
+        st.write("No forecast data available for the selected future date range.")
+        return # Exit early if no future data
 
     closest_idx = (forecast_future['ds'] - forecast_end_date).abs().idxmin()
     forecast_value = forecast_future.loc[closest_idx]
 
-    delta_val = None
+    # Calculate delta for metric based on quantiles if available and valid
+    delta_val = pd.NA
     delta_str = "Range N/A"
-    if pd.notna(forecast_value[lower_q_col]) and pd.notna(forecast_value[upper_q_col]):
+    if pd.notna(forecast_value.get(lower_q_col)) and pd.notna(forecast_value.get(upper_q_col)):
          delta_val = forecast_value[upper_q_col] - forecast_value[lower_q_col]
-         # Check if delta_val is not NaN before formatting
+         # Check if delta_val is not NaN/NA before formatting
          if pd.notna(delta_val):
-              delta_str = f"Range: {int(delta_val)}"
+              delta_str = f"Range: {int(delta_val):,}" # Add comma formatting
 
-
-    # Check if forecast value is not NaN before formatting
+    # Handle potential NA in forecast value for metric
     metric_value = int(forecast_value['yhat1']) if pd.notna(forecast_value['yhat1']) else "N/A"
+    if isinstance(metric_value, int):
+         metric_value_display = f"{metric_value:,}" # Add comma formatting
+    else:
+         metric_value_display = metric_value
 
-    st.metric(label="Forecasted Traffic (at End Date)", value=metric_value, delta=delta_str)
 
-    # Year-over-Year Calculation
+    st.metric(label=f"Forecasted Traffic (at {forecast_end_date.date()})",
+              value=metric_value_display,
+              delta=delta_str)
+
+    # --- Year-over-Year Calculation ---
+    st.subheader("Year-over-Year Comparison (Forecast vs Forecast)")
     start_forecast = last_date + pd.Timedelta(days=1)
     end_forecast = forecast_end_date
     current_period = forecast[(forecast['ds'] >= start_forecast) & (forecast['ds'] <= end_forecast)]
 
+    # Define the corresponding period one year earlier using forecast data
     start_prev = start_forecast - pd.Timedelta(days=365)
     end_prev = end_forecast - pd.Timedelta(days=365)
     prev_period = forecast[(forecast['ds'] >= start_prev) & (forecast['ds'] <= end_prev)]
 
     if not current_period.empty and not prev_period.empty:
+        # Ensure lengths match for a fair comparison (handle potential partial year data)
+        if len(current_period) != len(prev_period):
+            st.warning(f"YoY Comparison Warning: Periods have different lengths ({len(current_period)} vs {len(prev_period)} days). Comparison might be skewed.")
+            # Optional: Adjust periods to match length if desired, but summing available data is simpler
+
         current_sum = current_period['yhat1'].sum()
         prev_sum = prev_period['yhat1'].sum()
-        if pd.notna(prev_sum) and prev_sum != 0:
-            yoy_change = ((current_sum - prev_sum) / prev_sum) * 100
-            change_label = f"{yoy_change:.2f}%"
-        elif pd.notna(prev_sum) and prev_sum == 0 and current_sum > 0:
-             change_label = "inf%"
-        elif pd.notna(prev_sum) and prev_sum == 0 and current_sum == 0:
-             change_label = "0.00%"
-        else: # Handle cases where prev_sum might be NaN
-             change_label = "N/A"
 
+        change_label = "N/A"
+        if pd.notna(current_sum) and pd.notna(prev_sum):
+            if prev_sum != 0:
+                yoy_change = ((current_sum - prev_sum) / prev_sum) * 100
+                change_label = f"{yoy_change:.2f}%"
+            elif current_sum > 0:
+                 change_label = "inf%" # Previous was zero, current is positive
+            else:
+                 change_label = "0.00%" # Both are zero
 
-        st.subheader("Year-over-Year Comparison (Forecast vs Forecast)")
-        st.write(f"Total Forecasted Traffic ({start_forecast.date()} to {end_forecast.date()}): {current_sum:.0f}")
-        st.write(f"Total Forecasted Traffic ({start_prev.date()} to {end_prev.date()}): {prev_sum:.0f}")
+        st.write(f"Total Forecasted ({start_forecast.date()} to {end_forecast.date()}): {current_sum:,.0f}")
+        st.write(f"Total Forecasted ({start_prev.date()} to {end_prev.date()}): {prev_sum:,.0f}")
         st.write(f"Year-over-Year Change: {change_label}")
     else:
         st.warning("Not enough historical forecast data within the current run for Year-over-Year calculation.")
-        st.write(f"Required historical forecast range: {start_prev.date()} to {end_prev.date()}")
+        st.write(f"(Requires forecast data covering {start_prev.date()} to {end_prev.date()})")
 
 
 def main():
-    st.set_page_config(layout="wide")
-    st.title("GA4 Daily Forecasting with NeuralProphet")
+    """Main function to run the Streamlit app."""
+    st.set_page_config(layout="wide", page_title="GA4 Forecaster (NeuralProphet)") # Set page config
+    st.title("📊 GA4 Daily Forecasting with NeuralProphet")
     st.write("""
-        This app loads GA4 data (CSV), fits a **NeuralProphet** model to forecast daily sessions,
-        and displays actual vs. forecasted traffic with shaded Google update ranges.
-        A summary dashboard with a year-over-year comparison is provided below.
-
-        **Requirements:**
-        - CSV file must have columns named "Date" (format YYYYMMDD) and "Sessions".
-        - Data should be sorted chronologically (oldest first is best).
-        - Ensure you have the `neuralprophet`, `torch`, and `pandas` libraries installed (`pip install neuralprophet torch pandas matplotlib streamlit`).
+        Upload your Google Analytics 4 daily sessions data (CSV) to generate a forecast using NeuralProphet.
+        The app visualizes historical data, the forecast, uncertainty intervals, and relevant Google Algorithm Updates.
+    """)
+    st.markdown("""
+        **CSV Requirements:**
+        - Must contain columns named "**Date**" (format YYYYMMDD) and "**Sessions**".
+        - Data should ideally be sorted chronologically (oldest first).
+        - Ensure 'Sessions' column contains only numeric values.
     """)
 
+    # --- Sidebar for Inputs ---
+    st.sidebar.header("Configuration")
+    # Set default end date and allow user selection
     default_forecast_end = (pd.Timestamp.today() + timedelta(days=90)).date()
-    forecast_end_date_input = st.sidebar.date_input("Select Forecast End Date", value=default_forecast_end, min_value=pd.Timestamp.today().date())
+    min_forecast_date = (pd.Timestamp.today() + timedelta(days=1)).date() # Forecast must be in future
+    forecast_end_date_input = st.sidebar.date_input(
+        "Select Forecast End Date",
+        value=default_forecast_end,
+        min_value=min_forecast_date,
+        help="Choose the date up to which you want to forecast."
+    )
     forecast_end_date = pd.to_datetime(forecast_end_date_input)
 
-    df = load_data()
-    if df is not None:
+    st.sidebar.markdown("---")
+    st.sidebar.info("Ensure `neuralprophet`, `torch`, `pandas`, `matplotlib`, and `streamlit` are installed.")
+    # --- End Sidebar ---
+
+
+    # --- Main Area ---
+    # Load GA4 data
+    df_original = load_data()
+
+    if df_original is not None:
         st.subheader("Data Preview (First 5 Rows)")
-        st.dataframe(df.head())
+        st.dataframe(df_original.head(), use_container_width=True)
 
-        if len(df) < 14:
-             st.warning(f"Warning: Short dataset ({len(df)} rows). Model performance might be limited.")
+        # Perform forecasting and plotting
+        # Pass a copy of df to avoid modifying the original previewed df
+        forecast_df, last_date = plot_daily_forecast(df_original.copy(), forecast_end_date)
 
-        forecast_df, last_date = plot_daily_forecast(df.copy(), forecast_end_date)
-
+        # Display dashboard and download button if forecast was successful
         if forecast_df is not None and last_date is not None:
             display_dashboard(forecast_df, last_date, forecast_end_date)
 
+            # Option to download the full forecast numbers as CSV
             try:
-                csv_data = forecast_df.to_csv(index=False).encode('utf-8')
+                # Select relevant columns for download
+                download_cols = [col for col in forecast_df.columns if 'yhat' in col or col == 'ds' or '%' in col]
+                csv_data = forecast_df[download_cols].to_csv(index=False, date_format='%Y-%m-%d').encode('utf-8')
                 st.download_button(
-                    label="Download Full Forecast CSV",
+                    label="💾 Download Full Forecast CSV",
                     data=csv_data,
                     file_name=f'neuralprophet_forecast_{forecast_end_date.date()}.csv',
-                    mime='text/csv'
+                    mime='text/csv',
+                    help="Downloads the forecast values and uncertainty bounds."
                 )
             except Exception as e:
                 st.error(f"Failed to generate download file: {e}")
+        else:
+            st.error("Forecasting could not be completed due to previous errors.")
 
+    # Footer link
     st.markdown("---")
     st.markdown("Created by [The SEO Consultant.ai](https://theseoconsultant.ai/)")
+    # --- End Main Area ---
 
 if __name__ == "__main__":
     main()
