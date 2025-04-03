@@ -10,7 +10,7 @@ from torch.nn import SmoothL1Loss # PyTorch loss class
 from torch.optim import AdamW # PyTorch optimizer class
 from torch.optim.lr_scheduler import OneCycleLR # PyTorch LR scheduler class
 from numpy.core.multiarray import _reconstruct # NumPy array reconstruction function
-from numpy import ndarray # <-- ADDED NUMPY ARRAY TYPE IMPORT
+from numpy import ndarray, dtype # <-- ADDED dtype IMPORT
 
 # Import the configuration classes mentioned in previous errors
 from neuralprophet.configure import ConfigSeasonality, Season, Train, Trend
@@ -38,8 +38,9 @@ try:
         AdamW,                             # PyTorch optimizer class
         OneCycleLR,                        # PyTorch LR scheduler class
         _reconstruct,                      # NumPy array reconstruction function
-        ndarray                            # NumPy array type
-    ] # <-- ADDED ndarray
+        ndarray,                           # NumPy array type
+        dtype                              # NumPy data type class
+    ] # <-- ADDED dtype
     serialization.add_safe_globals(safe_globals_list)
     # Store message to show later inside main()
     ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es)/function(s) to torch safe globals." # Updated message slightly
