@@ -10,7 +10,7 @@ from torch.nn import SmoothL1Loss # PyTorch loss class
 from torch.optim import AdamW # PyTorch optimizer class
 from torch.optim.lr_scheduler import OneCycleLR # PyTorch LR scheduler class
 from numpy.core.multiarray import _reconstruct # NumPy array reconstruction function
-from numpy import ndarray, dtype # <-- ADDED dtype IMPORT
+from numpy import ndarray, dtype, float64 # <-- ADDED float64 IMPORT
 
 # Import the configuration classes mentioned in previous errors
 from neuralprophet.configure import ConfigSeasonality, Season, Train, Trend
@@ -30,7 +30,7 @@ set_log_level("ERROR")
 # This addresses the "Weights only load failed" error with PyTorch 2.6+.
 ADD_SAFE_GLOBALS_MESSAGE = "" # Store message instead of printing directly
 try:
-    # Add classes/functions that might be pickled/unpickled by NeuralProphet internally.
+    # Add classes/functions/types that might be pickled/unpickled by NeuralProphet internally.
     safe_globals_list = [
         ConfigSeasonality, Season, Train, Trend, # NeuralProphet configure classes
         PinballLoss,                       # NeuralProphet custom loss class
@@ -39,17 +39,18 @@ try:
         OneCycleLR,                        # PyTorch LR scheduler class
         _reconstruct,                      # NumPy array reconstruction function
         ndarray,                           # NumPy array type
-        dtype                              # NumPy data type class
-    ] # <-- ADDED dtype
+        dtype,                             # NumPy data type class
+        float64                            # Specific NumPy data type float64
+    ] # <-- ADDED float64
     serialization.add_safe_globals(safe_globals_list)
     # Store message to show later inside main()
-    ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es)/function(s) to torch safe globals." # Updated message slightly
+    ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es)/function(s)/type(s) to torch safe globals." # Updated message
 
 except AttributeError:
     ADD_SAFE_GLOBALS_MESSAGE = "Info: torch.serialization.add_safe_globals not used (likely older PyTorch version)."
 except ImportError:
     # Make the ImportError message slightly more specific if possible
-    ADD_SAFE_GLOBALS_MESSAGE = "Warning: Could not import one or more necessary classes/functions for torch compatibility." # Updated message
+    ADD_SAFE_GLOBALS_MESSAGE = "Warning: Could not import one or more necessary classes/functions/types for torch compatibility." # Updated message
 except Exception as e:
     ADD_SAFE_GLOBALS_MESSAGE = f"Warning: An unexpected error occurred while adding safe globals for torch: {e}"
 # --- End of allowlist section ---
