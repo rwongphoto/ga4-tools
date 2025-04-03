@@ -14,7 +14,6 @@ def configure_gemini():
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         st.error("🔴 Error: GOOGLE_API_KEY environment variable not found or empty. Please configure it in Posit Connect.")
-        # st.info("💡 For local testing, you might need to set this environment variable in your terminal.") # Keep UI cleaner
         return False
     try:
         genai.configure(api_key=api_key)
@@ -23,14 +22,15 @@ def configure_gemini():
         st.error(f"🔴 An unexpected error occurred during Gemini configuration: {e}")
         return False
 
-# --- Gemini Function for Historical Analysis ---
-def get_gemini_historical_analysis(actual_df_processed, google_updates): # Expects df with 'ds', 'y'
+# --- NEW Gemini Function for Historical DEVIATION Analysis ---
+def get_gemini_historical_deviation_analysis(historical_data_with_fit, google_updates):
     """
-    Analyzes the historical traffic data using Google Gemini API, focusing on
-    potential correlations with Google Algorithm Updates.
+    Analyzes historical traffic deviations from Prophet's fit using Google Gemini,
+    focusing on correlations with Google Algorithm Updates.
 
     Args:
-        actual_df_processed (pd.DataFrame): DataFrame with historical data ('ds', 'y' columns, sorted by ds).
+        historical_data_with_fit (pd.DataFrame): DataFrame with historical data
+                                                  ('ds', 'y' (actual), 'yhat' (predicted)).
         google_updates (list): List of tuples containing Google update info.
 
     Returns:
@@ -39,27 +39,31 @@ def get_gemini_historical_analysis(actual_df_processed, google_updates): # Expec
     if not configure_gemini():
         return "Gemini API not configured. Analysis cannot proceed."
 
-    if actual_df_processed.empty:
-        return "Historical data is empty. Cannot perform analysis."
+    if historical_data_with_fit.empty:
+        return "Historical data with fit is empty. Cannot perform analysis."
+
+    # Calculate deviation
+    historical_data_with_fit['deviation'] = historical_data_with_fit['y'] - historical_data_with_fit['yhat']
+    historical_data_with_fit['deviation_pct'] = (historical_data_with_fit['deviation'] / historical_data_with_fit['yhat']) * 100
+    historical_data_with_fit['deviation_pct'] = historical_data_with_fit['deviation_pct'].fillna(0).replace([float('inf'), -float('inf')], 0) # Handle potential division by zero
+
 
     try:
-        # --- Prepare data for the prompt ---
-        start_date = actual_df_processed['ds'].min().strftime('%Y-%m-%d')
-        end_date = actual_df_processed['ds'].max().strftime('%Y-%m-%d')
-        overall_avg = int(actual_df_processed['y'].mean())
-        # Use .iloc for positional access after confirming df is sorted and not empty
-        start_val = int(actual_df_processed.iloc[0]['y'])
-        end_val = int(actual_df_processed.iloc[-1]['y'])
-        overall_trend = "Increased" if end_val > start_val else "Decreased" if end_val < start_val else "Remained Stable"
+        # --- Prepare data summary for the prompt ---
+        start_date = historical_data_with_fit['ds'].min().strftime('%Y-%m-%d')
+        end_date = historical_data_with_fit['ds'].max().strftime('%Y-%m-%d')
+        avg_deviation_pct = historical_data_with_fit['deviation_pct'].mean()
 
-        historical_summary_str = f"""
-        - Data Period: {start_date} to {end_date}
-        - Starting Sessions: {start_val}
-        - Ending Sessions: {end_val}
-        - Average Sessions: {overall_avg}
-        - Overall Trend During Period: {overall_trend}
+        # Find periods of large deviations (e.g., > 1 std deviation) - more advanced, maybe later
+        # For now, just provide basic stats and let Gemini infer from the context.
+
+        deviation_summary_str = f"""
+        - Data Period Analyzed: {start_date} to {end_date}
+        - Average Deviation from Expected (Prophet Fit): {avg_deviation_pct:.2f}%
+        - Note: Positive deviation means actual traffic was higher than predicted by the model's baseline fit for that period; negative means lower.
         """
 
+        # Format Google Updates for the prompt
         updates_str = "\n".join([
             f"- {label} ({pd.to_datetime(start, format='%Y%m%d').strftime('%Y-%m-%d')} to {pd.to_datetime(end, format='%Y%m%d').strftime('%Y-%m-%d')})"
             for start, end, label in google_updates
@@ -67,25 +71,26 @@ def get_gemini_historical_analysis(actual_df_processed, google_updates): # Expec
 
         # --- Construct the prompt ---
         prompt = f"""
-        Analyze the provided historical SEO traffic (sessions) data in the context of known Google Algorithm Updates.
+        Analyze historical SEO traffic (sessions) data by comparing the ACTUAL traffic ('y') to the traffic PREDICTED by a Prophet time series model ('yhat') for the SAME historical period. The goal is to identify significant deviations and correlate them with Google Algorithm Updates.
 
         Context:
-        - The data represents website sessions from Google Analytics.
-        - The goal is to identify potential correlations between traffic fluctuations and the timing of Google Algorithm Updates.
+        - We are looking at the difference between actual performance and the baseline expectation set by the Prophet model's fit to the historical data.
+        - Large positive deviations mean traffic over-performed the model's expectation.
+        - Large negative deviations mean traffic under-performed the model's expectation.
 
-        Historical Data Summary:
-        {historical_summary_str}
+        Historical Deviation Summary:
+        {deviation_summary_str}
 
-        Google Algorithm Updates During or Near Data Period (YYYY-MM-DD):
+        Google Algorithm Updates During Data Period (YYYY-MM-DD):
         {updates_str}
 
         Task:
-        Provide a concise analysis (around 3-5 bullet points or a short paragraph) summarizing observations about the historical traffic *in relation to the Google updates*. Focus on:
-        1. Identifying any noticeable drops or increases in traffic volume that coincide (occur during or shortly after) specific Google update periods listed.
-        2. Commenting on periods of increased volatility around update rollouts.
-        3. Mentioning updates that seem to have had little to no observable impact on this dataset.
-        4. Providing an overall assessment of how sensitive this website's traffic appears to be to the listed Google updates based *only* on the provided data summary and update list.
-        5. Frame the analysis for an SEO Manager trying to understand past performance drivers. Do NOT analyze the future forecast.
+        Provide a concise analysis (around 3-5 bullet points or a short paragraph) summarizing the relationship between historical traffic *deviations* (actual vs. predicted) and the timing of Google updates. Focus on:
+        1. Identifying periods where actual traffic significantly deviated (positively or negatively) from the Prophet model's prediction ('yhat').
+        2. Explicitly stating whether these significant deviation periods coincide with (occur during or shortly after) specific Google update periods listed.
+        3. Noting any Google updates that appear to correlate strongly with either positive or negative deviations from the expected trend.
+        4. Mentioning updates that seem to have had little impact on the *deviation* (i.e., traffic performed roughly as the model expected during those times).
+        5. Frame the analysis for an SEO Manager assessing the *impact* of past updates relative to the expected baseline trend. Do NOT analyze the future forecast itself.
         """
 
         # --- Call the Gemini API ---
@@ -98,16 +103,15 @@ def get_gemini_historical_analysis(actual_df_processed, google_updates): # Expec
          st.error("🔴 Gemini API Error: The prompt was blocked.")
          return "Analysis failed: Prompt was blocked by safety filters."
     except Exception as e:
-        st.error(f"🔴 An error occurred while generating the AI historical analysis: {e}")
+        st.error(f"🔴 An error occurred while generating the AI deviation analysis: {e}")
         st.error(f"Traceback: {traceback.format_exc()}")
         return f"Analysis failed due to an error: {e}"
+
 
 # --- load_data function remains the same ---
 def load_data():
     uploaded_file = st.file_uploader(
-        "Choose a GA4 CSV file",
-        type="csv",
-        key="ga4_csv_uploader" # Keep the unique key
+        "Choose a GA4 CSV file", type="csv", key="ga4_csv_uploader"
     )
     if uploaded_file is not None:
         try:
@@ -115,292 +119,189 @@ def load_data():
             if 'Date' not in df.columns or 'Sessions' not in df.columns:
                 st.error("🔴 Error: CSV must contain 'Date' and 'Sessions' columns.")
                 return None
-            else:
-                 try:
-                     # Basic validation of format before full conversion
-                     if not df['Date'].astype(str).str.match(r'^\d{8}$').all():
-                          raise ValueError("Some 'Date' values are not in YYYYMMDD format.")
-                     # We'll do the proper conversion later in plotting functions
-                     # Just ensure Sessions is numeric
-                     df['Sessions'] = pd.to_numeric(df['Sessions'], errors='coerce')
-                     if df['Sessions'].isnull().any():
-                         st.warning("⚠️ Warning: Some 'Sessions' values were non-numeric and have been ignored.")
-                         df.dropna(subset=['Sessions'], inplace=True)
-                     df['Sessions'] = df['Sessions'].astype(int) # Convert to int after cleaning NaNs
-                     return df
-                 except ValueError as ve:
-                     st.error(f"🔴 Error: {ve}")
-                     return None
-                 except Exception as data_err:
-                     st.error(f"🔴 Error processing CSV data columns: {data_err}")
-                     return None
+            # Perform validation and basic type conversion here
+            try:
+                if not df['Date'].astype(str).str.match(r'^\d{8}$').all():
+                    raise ValueError("Some 'Date' values are not in YYYYMMDD format.")
+                df['Sessions'] = pd.to_numeric(df['Sessions'], errors='coerce')
+                if df['Sessions'].isnull().any():
+                    st.warning("⚠️ Non-numeric 'Sessions' values found and ignored.")
+                    df.dropna(subset=['Sessions'], inplace=True)
+                df['Sessions'] = df['Sessions'].astype(int)
+                # Convert Date to datetime object here for consistency
+                df['Date'] = pd.to_datetime(df['Date'].astype(str), format='%Y%m%d')
+                df.sort_values('Date', inplace=True, ignore_index=True) # Sort early
+                return df
+            except ValueError as ve:
+                st.error(f"🔴 Error validating data: {ve}")
+                return None
+            except Exception as data_err:
+                st.error(f"🔴 Error processing CSV data columns: {data_err}")
+                return None
         except Exception as e:
             st.error(f"🔴 Error loading or parsing CSV: {e}")
             return None
-    else:
-        return None
+    return None # No file uploaded
 
-# --- Plotting Functions (Revised Data Handling) ---
-# They now EXPECT a DataFrame with 'Date' (YYYYMMDD string) and 'Sessions' (numeric)
-# and will perform all necessary conversions/renaming/resampling internally.
 
-def plot_daily_forecast(df_original, forecast_end_date, google_updates):
-    """Generates daily forecast, plots actual vs forecast, returns results."""
-    df = df_original.copy() # Work on a copy
-    try:
-        # --- Internal Data Prep ---
-        df['Date'] = pd.to_datetime(df['Date'].astype(str), format='%Y%m%d')
-        df.rename(columns={'Date': 'ds', 'Sessions': 'y'}, inplace=True)
-        df.sort_values('ds', inplace=True)
-        # --- End Internal Data Prep ---
-    except Exception as e:
-        st.error(f"Error preparing data for daily plot: {e}")
+# --- MODIFIED Plotting Functions ---
+# Now handle fitting, predicting historical + future, and plotting all components.
+# They return the FULL forecast DataFrame (history+future) and the historical part with actuals.
+
+def run_prophet_and_plot(df_original, forecast_end_date, google_updates, granularity):
+    """
+    Fits Prophet, predicts historical fit & future forecast, plots results.
+
+    Args:
+        df_original (pd.DataFrame): DF with 'Date' (datetime) and 'Sessions' columns.
+        forecast_end_date (pd.Timestamp): User selected end date for future forecast.
+        google_updates (list): List of Google update tuples.
+        granularity (str): 'Daily', 'Weekly', or 'Monthly'.
+
+    Returns:
+        tuple: (full_forecast_df, historical_data_with_fit, last_actual_date)
+               Returns (None, None, None) on failure.
+    """
+    df = df_original.copy()
+    df.rename(columns={'Date': 'ds', 'Sessions': 'y'}, inplace=True) # Rename now
+
+    # --- Handle Granularity ---
+    df_prophet = df # Default is Daily
+    resample_freq = 'D'
+    if granularity == 'Weekly':
+        resample_freq = 'W'
+        df_prophet = df.set_index('ds').resample(resample_freq).sum().reset_index()
+    elif granularity == 'Monthly':
+        resample_freq = 'M'
+        df_prophet = df.set_index('ds').resample(resample_freq).sum().reset_index()
+
+    if df_prophet.empty:
+        st.error(f"Data empty after resampling to {granularity}.")
         return None, None, None
 
-    last_date = df['ds'].max()
-    if df.empty or pd.isna(last_date):
-         st.error("Input data empty or last date invalid after processing (daily).")
-         return None, None, None
-    last_actual_value = df.loc[df['ds'] == last_date, 'y'].iloc[0]
+    last_actual_date = df_prophet['ds'].max()
+    if pd.isna(last_actual_date):
+        st.error(f"Could not determine last actual date for {granularity} data.")
+        return None, None, None
 
-    periods = (forecast_end_date - last_date).days
-    if periods <= 0:
-        st.warning("Forecast end date not after last observed date. Plotting historical data only.")
-        forecast = None # No forecast to generate
-    else:
-        try:
-            model = Prophet()
-            model.fit(df)
-            future = model.make_future_dataframe(periods=periods, freq='D')
-            forecast = model.predict(future)
-        except Exception as e:
-            st.error(f"Error during Prophet forecasting (daily): {e}")
-            return None, last_date, last_actual_value # Return historical info
+    # --- Prophet Forecasting ---
+    try:
+        model = Prophet()
+        model.fit(df_prophet)
 
-    # Plotting
+        # Create dataframe for prediction (historical dates + future dates)
+        periods = 0
+        if forecast_end_date > last_actual_date:
+             # Calculate periods based on granularity
+             if granularity == 'Daily':
+                 periods = (forecast_end_date - last_actual_date).days
+             elif granularity == 'Weekly':
+                 periods = math.ceil((forecast_end_date - last_actual_date).days / 7)
+             elif granularity == 'Monthly':
+                  temp_date = last_actual_date
+                  while temp_date < forecast_end_date:
+                      temp_date += pd.offsets.MonthEnd(1)
+                      periods += 1
+
+        # Make future dataframe including history AND future periods
+        # This ensures Prophet predicts 'yhat' for historical dates too
+        future_df = model.make_future_dataframe(periods=periods, freq=resample_freq, include_history=True)
+
+        # Predict
+        full_forecast_df = model.predict(future_df)
+
+    except Exception as e:
+        st.error(f"Error during Prophet modeling/prediction ({granularity}): {e}")
+        st.error(traceback.format_exc())
+        return None, None, last_actual_date # Return last date if possible
+
+    # --- Prepare historical data with fit for deviation analysis ---
+    # Merge prophet's historical predictions back with actuals
+    historical_data_with_fit = pd.merge(
+        df_prophet, # Actual values (resampled if needed)
+        full_forecast_df[['ds', 'yhat', 'yhat_lower', 'yhat_upper']], # Predictions
+        on='ds',
+        how='left' # Keep all actual dates
+    )
+
+    # --- Plotting ---
     fig, ax = plt.subplots(figsize=(16, 8))
     try:
-        ax.plot(df['ds'], df['y'], label='Actual', color='blue', marker='.', linestyle='-') # Add markers
-        if forecast is not None:
-            # Plot only future forecast points clearly separated
-            forecast_future_part = forecast[forecast['ds'] > last_date]
-            ax.plot(forecast_future_part['ds'], forecast_future_part['yhat'], label='Forecast', color='green', linestyle='--')
-            # Optionally plot historical fit too
-            # forecast_hist_part = forecast[forecast['ds'] <= last_date]
-            # ax.plot(forecast_hist_part['ds'], forecast_hist_part['yhat'], label='Prophet Fit', color='orange', linestyle=':')
+        # 1. Plot Actual Historical Data
+        ax.plot(historical_data_with_fit['ds'], historical_data_with_fit['y'],
+                label='Actual (' + granularity + ')', color='blue', marker='.', markersize=4, linestyle='-')
 
-        # Plot Google updates
+        # 2. Plot Prophet's Prediction/Fit for the historical period
+        ax.plot(historical_data_with_fit['ds'], historical_data_with_fit['yhat'],
+                label='Prophet Predicted Fit', color='orange', linestyle=':')
+
+        # 3. Plot Future Forecast (if exists)
+        future_forecast_part = full_forecast_df[full_forecast_df['ds'] > last_actual_date]
+        if not future_forecast_part.empty:
+            ax.plot(future_forecast_part['ds'], future_forecast_part['yhat'],
+                    label='Prophet Future Forecast', color='green', linestyle='--')
+            # 4. Plot Confidence Interval (only for future part for clarity, or full?)
+            # Plotting full interval:
+            ax.fill_between(full_forecast_df['ds'], full_forecast_df['yhat_lower'], full_forecast_df['yhat_upper'],
+                           color='skyblue', alpha=0.3, label='Confidence Interval')
+
+
+        # 5. Plot Google Updates
         for start_str, end_str, label in google_updates:
             try:
                 start_date = pd.to_datetime(start_str, format='%Y%m%d')
                 end_date = pd.to_datetime(end_str, format='%Y%m%d')
                 mid_date = start_date + (end_date - start_date) / 2
-                ax.axvspan(start_date, end_date, color='gray', alpha=0.2, label='_nolegend_') # Hide span from legend
+                ax.axvspan(start_date, end_date, color='gray', alpha=0.2, label='_nolegend_')
                 y_limits = ax.get_ylim()
-                text_y_pos = y_limits[1] * 0.98 if y_limits and y_limits[1] > y_limits[0] else (df['y'].max() * 0.98)
+                # Adjust y-position calculation based on actual data max
+                text_y_pos = (y_limits[1] * 0.98) if y_limits and y_limits[1] > y_limits[0] else (historical_data_with_fit['y'].max() * 1.02) # Place slightly above max actual
                 ax.text(mid_date, text_y_pos, label, ha='center', va='top', fontsize=8, rotation=90)
             except Exception as plot_err:
                  st.warning(f"Could not plot Google update '{label}': {plot_err}")
 
-        ax.set_title('Daily Actual vs. Forecasted GA4 Sessions with Google Update Ranges')
+        ax.set_title(f'{granularity} Actual vs. Prophet Fit & Forecast with Google Updates')
         ax.set_xlabel('Date')
         ax.set_ylabel('Sessions')
         ax.legend()
+        ax.grid(True, linestyle='--', alpha=0.6)
         st.pyplot(fig)
     except Exception as e:
-        st.error(f"Error during plotting (daily): {e}")
+        st.error(f"Error during plotting ({granularity}): {e}")
     finally:
         plt.close(fig)
 
-    return forecast, last_date, last_actual_value
+    return full_forecast_df, historical_data_with_fit, last_actual_date
 
 
-def plot_weekly_forecast(df_original, forecast_end_date, google_updates):
-    """Generates weekly forecast, plots actual vs forecast, returns results."""
-    df = df_original.copy()
-    try:
-        # --- Internal Data Prep ---
-        df['Date'] = pd.to_datetime(df['Date'].astype(str), format='%Y%m%d')
-        df.rename(columns={'Date': 'ds', 'Sessions': 'y'}, inplace=True)
-        df.sort_values('ds', inplace=True)
-        df_weekly = df.set_index('ds').resample('W').sum().reset_index() # Resample
-        # --- End Internal Data Prep ---
-    except Exception as e:
-        st.error(f"Error preparing data for weekly plot: {e}")
-        return None, None, None
+# --- display_dashboard remains similar (shows FUTURE forecast summary) ---
+def display_dashboard(full_forecast_df, last_actual_date, forecast_end_date, granularity_label):
+    st.subheader(f"Future Forecast Summary ({granularity_label})")
 
-    if df_weekly.empty:
-        st.error("No data after weekly resampling.")
-        return None, None, None
+    # Filter for future dates only
+    forecast_future = full_forecast_df[
+        (full_forecast_df['ds'] > last_actual_date) &
+        (full_forecast_df['ds'] <= forecast_end_date)
+    ].copy() # Ensure it's a copy
 
-    last_date = df_weekly['ds'].max()
-    if pd.isna(last_date):
-        st.error("Last date invalid after weekly resampling.")
-        return None, None, None
-    last_actual_value = df_weekly.loc[df_weekly['ds'] == last_date, 'y'].iloc[0]
-
-    periods = math.ceil((forecast_end_date - last_date).days / 7)
-    if periods <= 0:
-        st.warning("Forecast end date not after last observed week. Plotting historical data only.")
-        forecast = None
-    else:
-        try:
-            model = Prophet()
-            model.fit(df_weekly)
-            future = model.make_future_dataframe(periods=periods, freq='W')
-            forecast = model.predict(future)
-        except Exception as e:
-            st.error(f"Error during Prophet forecasting (weekly): {e}")
-            return None, last_date, last_actual_value
-
-    # Plotting
-    fig, ax = plt.subplots(figsize=(16, 8))
-    try:
-        ax.plot(df_weekly['ds'], df_weekly['y'], label='Weekly Actual', color='blue', marker='.', linestyle='-')
-        if forecast is not None:
-            forecast_future_part = forecast[forecast['ds'] > last_date]
-            ax.plot(forecast_future_part['ds'], forecast_future_part['yhat'], label='Weekly Forecast', color='green', linestyle='--')
-
-        # Plot Google updates
-        for start_str, end_str, label in google_updates:
-            try:
-                start_date = pd.to_datetime(start_str, format='%Y%m%d')
-                end_date = pd.to_datetime(end_str, format='%Y%m%d')
-                mid_date = start_date + (end_date - start_date) / 2
-                ax.axvspan(start_date, end_date, color='gray', alpha=0.2, label='_nolegend_')
-                y_limits = ax.get_ylim()
-                text_y_pos = y_limits[1] * 0.98 if y_limits and y_limits[1] > y_limits[0] else (df_weekly['y'].max() * 0.98)
-                ax.text(mid_date, text_y_pos, label, ha='center', va='top', fontsize=8, rotation=90)
-            except Exception as plot_err:
-                 st.warning(f"Could not plot Google update '{label}': {plot_err}")
-
-        ax.set_title('Weekly Actual vs. Forecasted GA4 Sessions with Google Update Ranges')
-        ax.set_xlabel('Date (Week Start)')
-        ax.set_ylabel('Sessions (Weekly Total)')
-        ax.legend()
-        st.pyplot(fig)
-    except Exception as e:
-        st.error(f"Error during plotting (weekly): {e}")
-    finally:
-        plt.close(fig)
-
-    return forecast, last_date, last_actual_value
-
-
-def plot_monthly_forecast(df_original, forecast_end_date, google_updates):
-    """Generates monthly forecast, plots actual vs forecast, returns results."""
-    df = df_original.copy()
-    try:
-        # --- Internal Data Prep ---
-        df['Date'] = pd.to_datetime(df['Date'].astype(str), format='%Y%m%d')
-        df.rename(columns={'Date': 'ds', 'Sessions': 'y'}, inplace=True)
-        df.sort_values('ds', inplace=True)
-        df_monthly = df.set_index('ds').resample('M').sum().reset_index() # Resample Month End
-        # --- End Internal Data Prep ---
-    except Exception as e:
-        st.error(f"Error preparing data for monthly plot: {e}")
-        return None, None, None
-
-    if df_monthly.empty:
-        st.error("No data after monthly resampling.")
-        return None, None, None
-
-    last_date = df_monthly['ds'].max()
-    if pd.isna(last_date):
-        st.error("Last date invalid after monthly resampling.")
-        return None, None, None
-    last_actual_value = df_monthly.loc[df_monthly['ds'] == last_date, 'y'].iloc[0]
-
-    periods = 0
-    temp_date = last_date
-    while temp_date < forecast_end_date:
-        temp_date += pd.offsets.MonthEnd(1)
-        periods += 1
-
-    if periods <= 0:
-        st.warning("Forecast end date not after last observed month. Plotting historical data only.")
-        forecast = None
-    else:
-        try:
-            model = Prophet()
-            model.fit(df_monthly)
-            future = model.make_future_dataframe(periods=periods, freq='M')
-            forecast = model.predict(future)
-        except Exception as e:
-            st.error(f"Error during Prophet forecasting (monthly): {e}")
-            return None, last_date, last_actual_value
-
-    # Plotting
-    fig, ax = plt.subplots(figsize=(16, 8))
-    try:
-        ax.plot(df_monthly['ds'], df_monthly['y'], label='Monthly Actual', color='blue', marker='.', linestyle='-')
-        if forecast is not None:
-            forecast_future_part = forecast[forecast['ds'] > last_date]
-            ax.plot(forecast_future_part['ds'], forecast_future_part['yhat'], label='Monthly Forecast', color='green', linestyle='--')
-
-        # Plot Google updates
-        for start_str, end_str, label in google_updates:
-            try:
-                start_date = pd.to_datetime(start_str, format='%Y%m%d')
-                end_date = pd.to_datetime(end_str, format='%Y%m%d')
-                mid_date = start_date + (end_date - start_date) / 2
-                ax.axvspan(start_date, end_date, color='gray', alpha=0.2, label='_nolegend_')
-                y_limits = ax.get_ylim()
-                text_y_pos = y_limits[1] * 0.98 if y_limits and y_limits[1] > y_limits[0] else (df_monthly['y'].max() * 0.98)
-                ax.text(mid_date, text_y_pos, label, ha='center', va='top', fontsize=8, rotation=90)
-            except Exception as plot_err:
-                 st.warning(f"Could not plot Google update '{label}': {plot_err}")
-
-        ax.set_title('Monthly Actual vs. Forecasted GA4 Sessions with Google Update Ranges')
-        ax.set_xlabel('Date (Month End)')
-        ax.set_ylabel('Sessions (Monthly Total)')
-        ax.legend()
-        st.pyplot(fig)
-    except Exception as e:
-        st.error(f"Error during plotting (monthly): {e}")
-    finally:
-        plt.close(fig)
-
-    return forecast, last_date, last_actual_value
-
-# --- display_dashboard remains the same (displays forecast results) ---
-def display_dashboard(forecast, last_date, forecast_end_date, forecast_type_label):
-    st.subheader("Forecast Data Table & Summary")
-    # Filter forecast for dates strictly after the last actual date up to the chosen end date
-    forecast_filtered = forecast[(forecast['ds'] > last_date) & (forecast['ds'] <= forecast_end_date)]
-
-    if not forecast_filtered.empty:
-        # Display rounded dataframe
-        st.dataframe(forecast_filtered[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].astype(
+    if not forecast_future.empty:
+        # Display table of future points
+        st.dataframe(forecast_future[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].astype(
             {'yhat':'int', 'yhat_lower':'int', 'yhat_upper':'int'}
-        ).reset_index(drop=True)) # Reset index for cleaner look
-    else:
-        st.write("No forecast data points fall within the selected future range.")
+        ).reset_index(drop=True))
 
-    horizon_str = "N/A"
-    # Calculate horizon based on number of rows in the filtered future forecast
-    if not forecast_filtered.empty:
-        horizon = len(forecast_filtered)
-        granularity = forecast_type_label.split(" ")[0] # Daily, Weekly, Monthly
-        if granularity == "Daily": horizon_str = f"{horizon} days"
-        elif granularity == "Weekly": horizon_str = f"{horizon} weeks"
-        else: horizon_str = f"{horizon} months"
-    elif (forecast_end_date > last_date): # Check if forecast period is valid but just empty
-        horizon_str = "0 (within period)"
-    else:
-        horizon_str = "N/A (No forecast period)"
+        horizon = len(forecast_future)
+        unit = granularity_label.lower().replace("ly","") # day, week, month
+        horizon_str = f"{horizon} {unit}{'s' if horizon != 1 else ''}"
 
+        # Display summary metrics using columns
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(label="Last Actual Date", value=f"{last_actual_date.date() if last_actual_date else 'N/A'}")
+        with col2:
+            st.metric(label="Forecast Horizon", value=f"{horizon_str}")
 
-    # Display summary metrics using columns
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(label="Last Actual Date", value=f"{last_date.date() if last_date else 'N/A'}")
-    with col2:
-        st.metric(label="Forecast Horizon", value=f"{horizon_str}")
-
-    # Display forecast value only if forecast is available and filtered data exists
-    if not forecast_filtered.empty:
-        forecast_value_at_end = forecast_filtered.iloc[-1]
+        forecast_value_at_end = forecast_future.iloc[-1]
         forecast_range = int(forecast_value_at_end['yhat_upper'] - forecast_value_at_end['yhat_lower'])
         delta_val = forecast_range / 2
         with col3:
@@ -409,17 +310,19 @@ def display_dashboard(forecast, last_date, forecast_end_date, forecast_type_labe
                       delta=f"±{delta_val:.0f} (Range: {forecast_range})",
                       delta_color="off")
     else:
-         with col3:
-            st.metric(label="Forecast Value", value="N/A")
+        st.info("No future forecast points fall within the selected date range or forecast was not generated.")
+        # Still show last actual date if available
+        st.metric(label="Last Actual Date", value=f"{last_actual_date.date() if last_actual_date else 'N/A'}")
 
 
 # --- Main Application Logic ---
 def main():
-    st.set_page_config(page_title="Google Algorithm Impact Visualizer + AI Analysis", layout="wide")
-    st.title("📈 Google Algorithm Impact Visualizer with AI Analysis")
+    st.set_page_config(page_title="Google Algorithm Impact Analyzer", layout="wide") # Updated Title
+    st.title("📈 Google Algorithm Impact Analyzer")
     st.write("""
-        Upload GA4 sessions CSV ('Date' as YYYYMMDD, 'Sessions'). Visualize historical trends against Google updates,
-        generate a Prophet forecast, and get AI analysis of past performance related to updates.
+        Upload GA4 sessions CSV ('Date' as YYYYMMDD, 'Sessions').
+        Visualize **Actual Traffic** vs. **Prophet's Predicted Fit** against Google updates.
+        Optionally generate a future forecast and get AI analysis of **historical deviations** correlated with updates.
     """)
     st.info("💡 Ensure CSV has 'Date' (YYYYMMDD format) and 'Sessions' (numeric) columns.")
 
@@ -435,91 +338,94 @@ def main():
     ]
 
     # --- Sidebar Controls ---
-    # Use 'key' to help Streamlit manage state
-    forecast_granularity = st.sidebar.radio("Select Forecast Granularity", ("Daily", "Weekly", "Monthly"), key="forecast_granularity_radio")
-    default_forecast_end = (pd.Timestamp.today() + timedelta(days=90)).date()
-    min_date_allowed = pd.Timestamp.today().date() + timedelta(days=1) # Forecast must be future
-    forecast_end_date_input = st.sidebar.date_input("Select Forecast End Date", value=default_forecast_end, min_value=min_date_allowed, key="forecast_date_input")
-    forecast_end_date = pd.to_datetime(forecast_end_date_input)
+    granularity = st.sidebar.radio("Select Analysis Granularity", ("Daily", "Weekly", "Monthly"), key="granularity_radio")
+    # Option to enable/disable future forecast - default ON
+    show_future_forecast = st.sidebar.checkbox("Include Future Forecast?", value=True, key="show_future_cb")
+    forecast_end_date = None
+    if show_future_forecast:
+        default_forecast_end = (pd.Timestamp.today() + timedelta(days=90)).date()
+        min_date_allowed = pd.Timestamp.today().date() + timedelta(days=1)
+        forecast_end_date_input = st.sidebar.date_input(
+            "Select Forecast End Date",
+            value=default_forecast_end,
+            min_value=min_date_allowed,
+            key="forecast_date_input",
+            disabled=not show_future_forecast # Disable if checkbox is off
+        )
+        forecast_end_date = pd.to_datetime(forecast_end_date_input)
+    else:
+        # Set forecast_end_date to last possible date if forecast disabled,
+        # to prevent errors in period calculation, Prophet will ignore it.
+        # Or more simply, pass None and handle it in run_prophet_and_plot
+        forecast_end_date = pd.Timestamp.today() # Needs a value, even if unused
 
     # --- File Upload ---
-    df_original = load_data()
+    df_original = load_data() # Now returns df with 'Date' as datetime object
 
     # --- Main Processing Area ---
     if df_original is not None:
         st.subheader("Data Preview (First 5 Rows)")
-        st.dataframe(df_original.head())
+        # Show Date in YYYY-MM-DD format for preview
+        st.dataframe(df_original.head().assign(Date=lambda x: x['Date'].dt.strftime('%Y-%m-%d')))
 
-        # Prepare data specifically for historical AI analysis ('ds', 'y' format)
-        df_processed_for_ai = None
-        try:
-            df_processed_for_ai = df_original.copy()
-            df_processed_for_ai['Date'] = pd.to_datetime(df_processed_for_ai['Date'].astype(str), format='%Y%m%d')
-            df_processed_for_ai.rename(columns={'Date': 'ds', 'Sessions': 'y'}, inplace=True)
-            df_processed_for_ai.sort_values('ds', inplace=True, ignore_index=True)
-        except Exception as e:
-            st.error(f"Failed to prepare data for AI analysis: {e}")
-            # Allow app to continue, but AI section will be disabled implicitly
-
-        # --- AI Historical Analysis Section ---
+        # --- Run Prophet & Plotting Section ---
         st.markdown("---")
-        st.header("🤖 AI Historical Analysis vs. Google Updates")
+        st.header("📊 Historical Performance vs. Prophet Fit & Forecast")
+
+        full_forecast_df = None
+        historical_data_with_fit = None
+        last_actual_date = None
+
+        try:
+            # Determine effective end date for Prophet run
+            # If not showing future forecast, set end date to last actual date
+            effective_end_date = forecast_end_date if show_future_forecast else df_original['Date'].max()
+
+            with st.spinner(f"Running Prophet ({granularity}) and generating plot..."):
+                results = run_prophet_and_plot(
+                    df_original.copy(),
+                    effective_end_date, # Pass effective end date
+                    google_updates,
+                    granularity
+                )
+
+            if results:
+                full_forecast_df, historical_data_with_fit, last_actual_date = results
+            # else: Error message was shown in the function
+
+        except Exception as e:
+            st.error(f"🔴 An error occurred during the main analysis process: {e}")
+            st.error(f"Traceback: {traceback.format_exc()}")
+
+
+        # --- AI Historical DEVIATION Analysis Section ---
+        st.markdown("---")
+        st.header("🤖 AI Analysis: Historical Deviations vs. Google Updates")
         api_key_present = bool(os.getenv("GOOGLE_API_KEY"))
 
         if not api_key_present:
             st.warning("⚠️ GOOGLE_API_KEY environment variable not set. AI analysis disabled.")
-        elif df_processed_for_ai is None:
-             st.warning("⚠️ Data could not be processed for AI analysis.")
+        elif historical_data_with_fit is None or historical_data_with_fit.empty:
+             st.warning("⚠️ Cannot perform AI analysis: Historical data with Prophet fit not available.")
         else:
-            # Only show button if API key is present AND data was processed
-            if st.button("📊 Analyze Historical Traffic vs. Updates", key="analyze_historical_button"):
+            # Only show button if API key is present AND historical fit data exists
+            if st.button("📈 Analyze Historical Performance Deviations", key="analyze_deviation_button"):
                 if configure_gemini():
-                    with st.spinner("🧠 Analyzing historical data with Gemini..."):
-                        historical_analysis_result = get_gemini_historical_analysis(df_processed_for_ai, google_updates)
-                    st.markdown(historical_analysis_result)
+                    with st.spinner("🧠 Analyzing historical deviations with Gemini..."):
+                        deviation_analysis_result = get_gemini_historical_deviation_analysis(
+                            historical_data_with_fit.copy(), # Pass a copy
+                            google_updates
+                        )
+                    st.markdown(deviation_analysis_result)
                 # else: configure_gemini showed error
 
-        # --- Forecasting and Plotting Section ---
+
+        # --- Display Future Forecast Dashboard (if applicable) ---
         st.markdown("---")
-        st.header("📊 Forecast & Visualization")
-
-        plot_function = None
-        if forecast_granularity == "Daily":
-            plot_function = plot_daily_forecast
-        elif forecast_granularity == "Weekly":
-            plot_function = plot_weekly_forecast
-        elif forecast_granularity == "Monthly":
-            plot_function = plot_monthly_forecast
-
-        if plot_function:
-            try:
-                # Pass a fresh COPY of the original data to the plotting function
-                # It will handle its own prep (renaming, resampling etc.)
-                with st.spinner(f"Generating {forecast_granularity} forecast and plot..."):
-                    forecast_result = plot_function(df_original.copy(), forecast_end_date, google_updates)
-
-                # Unpack results
-                forecast, last_date, last_actual_value = None, None, None # Default values
-                if forecast_result:
-                     forecast, last_date, last_actual_value = forecast_result
-                # else: plotting function might have shown error or returned Nones
-
-                # Display Forecast Dashboard
-                st.markdown("---") # Separator before dashboard
-                if forecast is not None and last_date is not None:
-                    display_dashboard(forecast, last_date, forecast_end_date, f"{forecast_granularity} Forecast")
-                elif last_date is not None: # Plotting worked historically, but forecast failed/not requested
-                    st.info("Forecast could not be generated (check forecast end date?). Displaying historical data summary only.")
-                    # Show a minimal dashboard if forecast failed but we have last_date
-                    display_dashboard(pd.DataFrame(), last_date, forecast_end_date, f"{forecast_granularity} Forecast") # Pass empty forecast df
-                else: # Plotting function itself failed
-                     st.error("Could not generate plot or forecast.")
-
-            except Exception as e:
-                st.error(f"🔴 An error occurred during the forecasting/plotting process: {e}")
-                st.error(f"Traceback: {traceback.format_exc()}")
-        else:
-            st.error("Internal error: Could not determine plotting function.")
+        if show_future_forecast and full_forecast_df is not None and last_actual_date is not None:
+             display_dashboard(full_forecast_df, last_actual_date, forecast_end_date, granularity)
+        elif show_future_forecast:
+            st.info("Future forecast dashboard could not be displayed (forecasting might have failed or data was insufficient).")
 
 
     else:
