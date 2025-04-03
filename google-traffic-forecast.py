@@ -2,7 +2,12 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import timedelta
+import torch
 from neuralprophet import NeuralProphet
+from neuralprophet.configure import ConfigSeasonality
+
+# Allow the global used by NeuralProphet to be loaded safely.
+torch.serialization.add_safe_global("neuralprophet.configure.ConfigSeasonality", ConfigSeasonality)
 
 def load_data():
     uploaded_file = st.file_uploader("Choose a GA4 CSV file", type="csv")
