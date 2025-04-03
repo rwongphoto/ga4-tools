@@ -4,3 +4,4 @@ matplotlib
 neuralprophet
 torch<2.6  # Or specify a specific version like torch==2.5.1
 numpy
+prophet
