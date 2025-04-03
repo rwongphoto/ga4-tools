@@ -100,7 +100,7 @@ def get_gemini_historical_deviation_analysis(historical_data_with_fit, google_up
         """
 
         # --- Call the Gemini API ---
-        model = genai.GenerativeModel('gemini-2.0-pro')
+        model = genai.GenerativeModel('gemini-1.5-pro')
         response = model.generate_content(prompt)
         analysis = response.text.replace('•', '*') # Basic markdown cleanup
         return analysis
