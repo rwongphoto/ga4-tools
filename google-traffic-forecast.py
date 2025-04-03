@@ -10,7 +10,8 @@ from torch.nn import SmoothL1Loss # PyTorch loss class
 from torch.optim import AdamW # PyTorch optimizer class
 from torch.optim.lr_scheduler import OneCycleLR # PyTorch LR scheduler class
 from numpy.core.multiarray import _reconstruct # NumPy array reconstruction function
-from numpy import ndarray, dtype, float64 # <-- ADDED float64 IMPORT
+from numpy import ndarray, dtype, float64
+from numpy.dtypes import Float64DType # <-- ADDED SPECIFIC DType IMPORT
 
 # Import the configuration classes mentioned in previous errors
 from neuralprophet.configure import ConfigSeasonality, Season, Train, Trend
@@ -40,17 +41,18 @@ try:
         _reconstruct,                      # NumPy array reconstruction function
         ndarray,                           # NumPy array type
         dtype,                             # NumPy data type class
-        float64                            # Specific NumPy data type float64
-    ] # <-- ADDED float64
+        float64,                           # NumPy float64 type (might be redundant now)
+        Float64DType                       # Specific NumPy Float64DType class from error
+    ] # <-- ADDED Float64DType
     serialization.add_safe_globals(safe_globals_list)
     # Store message to show later inside main()
-    ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es)/function(s)/type(s) to torch safe globals." # Updated message
+    ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} items to torch safe globals." # Simplified message
 
 except AttributeError:
     ADD_SAFE_GLOBALS_MESSAGE = "Info: torch.serialization.add_safe_globals not used (likely older PyTorch version)."
-except ImportError:
+except ImportError as imp_err:
     # Make the ImportError message slightly more specific if possible
-    ADD_SAFE_GLOBALS_MESSAGE = "Warning: Could not import one or more necessary classes/functions/types for torch compatibility." # Updated message
+    ADD_SAFE_GLOBALS_MESSAGE = f"Warning: Could not import one or more necessary items for torch compatibility: {imp_err}" # Include specific error
 except Exception as e:
     ADD_SAFE_GLOBALS_MESSAGE = f"Warning: An unexpected error occurred while adding safe globals for torch: {e}"
 # --- End of allowlist section ---
