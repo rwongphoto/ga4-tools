@@ -27,7 +27,6 @@ st.set_page_config(layout="wide", page_title="GA4 Forecaster (NeuralProphet)")
 set_log_level("ERROR")
 
 # --- Allowlist section (likely inactive with older PyTorch) ---
-ADD_SAFE_GLOBALS_MESSAGE = "Info: Using older PyTorch version, safe_globals allowlisting may not be active."
 # ...(rest of safe_globals block, potentially commented out)...
 
 
@@ -365,7 +364,6 @@ def main():
         help="Choose the date up to which you want to forecast." )
     forecast_end_date = pd.to_datetime(forecast_end_date_input)
     st.sidebar.markdown("---")
-    st.sidebar.info("Ensure `neuralprophet`, `torch<2.6`, `numpy`, `pandas`, `matplotlib`, and `streamlit` are installed.")
 
     # --- Main Area ---
     df_original = load_data()
