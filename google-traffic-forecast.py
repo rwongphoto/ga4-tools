@@ -7,9 +7,8 @@ import logging
 import torch # Import torch
 from torch import serialization # Import serialization module
 
-# Import ONLY the specific class mentioned in the ORIGINAL torch.load error
-# If other errors appear later mentioning different classes, add them here.
-from neuralprophet.configure import ConfigSeasonality
+# Import the classes mentioned in the errors
+from neuralprophet.configure import ConfigSeasonality, Season # <-- ADDED Season
 
 # --- MOVE st.set_page_config() HERE ---
 # Must be the first Streamlit command executed
@@ -22,10 +21,10 @@ set_log_level("ERROR")
 
 # --- Add this section to allowlist necessary classes for torch.load ---
 # This addresses the "Weights only load failed" error with PyTorch 2.6+.
-# Keep the logic, but remove direct Streamlit calls from global scope
 ADD_SAFE_GLOBALS_MESSAGE = "" # Store message instead of printing directly
 try:
-    safe_globals_list = [ConfigSeasonality]
+    # Add classes that might be pickled/unpickled by NeuralProphet internally.
+    safe_globals_list = [ConfigSeasonality, Season] # <-- ADDED Season
     serialization.add_safe_globals(safe_globals_list)
     # Store message to show later inside main()
     ADD_SAFE_GLOBALS_MESSAGE = f"Info: Added {len(safe_globals_list)} class(es) to torch safe globals for compatibility."
@@ -442,7 +441,7 @@ def main():
             except Exception as e:
                 st.error(f"Failed to generate download file: {e}")
         else:
-            st.error("Forecasting could not be completed due to previous errors.")
+            st.error("Forecasting could not be completed due to previous errors.") # Shows if plot_daily_forecast returned None
 
     # Footer link
     st.markdown("---")
