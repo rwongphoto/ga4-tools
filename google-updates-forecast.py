@@ -214,10 +214,10 @@ def display_dashboard(forecast, last_date, forecast_end_date, forecast_type):
               delta=f"{int(forecast_value['yhat_upper'] - forecast_value['yhat_lower'])} range")
 
 def main():
-    st.title("GA4 Forecasting with Prophet")
+    st.set_page_config(page_title="Google Algorithm Impact Visualizer", layout="wide")
+    st.title("Google Algorithm Impact Visualizer")
     st.write("""
-        This app loads GA4 data, fits a Prophet model to forecast future sessions,
-        and displays actual vs. forecasted traffic with shaded Google update ranges.
+        This app loads GA4 data, fits a Prophet model to display actual vs. forecasted traffic with shaded Google update ranges.
         Choose a forecast type (Daily, Weekly, or Monthly) and select a forecast end date.
         A table and summary dashboard are provided underneath the chart.
     """)
