@@ -198,6 +198,10 @@ def plot_daily_forecast(df, forecast_end_date):
         ('20231102', '20231204', 'Nov 23 Core+Spam'), ('20240305', '20240419', 'Mar 24 Core'),
         ('20240506', '20240507', 'Site Rep Abuse'), ('20240514', '20240515', 'AI Overviews'),
         ('20240620', '20240627', 'Jun 24 Core'), ('20240815', '20240903', 'Aug 24 Core'),
+        ('20241111', '20241205', 'Nov 24 Core'),
+        ('20241212', '20241218', 'Dec 24 Core'),
+        ('20241219', '20241226', 'Dec 24 Spam'),
+        ('20250313', '20250327', 'Mar 25 Core')
     ]
     # ...(rest of google update plotting code remains the same)...
     plot_bottom, plot_top = ax.get_ylim()
