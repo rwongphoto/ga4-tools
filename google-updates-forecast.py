@@ -7,6 +7,8 @@ from datetime import timedelta
 import google.generativeai as genai
 import traceback
 import os
+import holoviews as hv  # <-- Import HoloViews
+hv.extension('bokeh') # <-- Set Bokeh backend for Streamlit compatibility
 
 # --- Google Gemini Configuration ---
 def configure_gemini():
@@ -14,7 +16,6 @@ def configure_gemini():
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         # Avoid showing error directly here, let the calling function handle UI
-        # st.error("🔴 Error: GOOGLE_API_KEY environment variable not found or empty.")
         return False
     try:
         genai.configure(api_key=api_key)
@@ -100,7 +101,7 @@ def get_gemini_historical_deviation_analysis(historical_data_with_fit, google_up
         """
 
         # --- Call the Gemini API ---
-        model = genai.GenerativeModel('gemini-1.5-pro')
+        model = genai.GenerativeModel('gemini-1.5-pro') # Or 'gemini-pro'
         response = model.generate_content(prompt)
         analysis = response.text.replace('•', '*') # Basic markdown cleanup
         return analysis
@@ -168,7 +169,7 @@ def load_data():
 # --- Prophet Modeling and Plotting Function ---
 def run_prophet_and_plot(df_original, effective_end_date, google_updates, granularity):
     """
-    Fits Prophet, predicts historical fit & future forecast, plots results.
+    Fits Prophet, predicts historical fit & future forecast, plots results using Matplotlib.
 
     Args:
         df_original (pd.DataFrame): DF with 'Date' (datetime) and 'Sessions'.
@@ -272,7 +273,7 @@ def run_prophet_and_plot(df_original, effective_end_date, google_updates, granul
         how='left' # Keep all actual dates, even if Prophet didn't predict for some edge reason
     )
 
-    # --- Plotting ---
+    # --- Plotting (Matplotlib) ---
     fig, ax = plt.subplots(figsize=(16, 9)) # Slightly taller figure
     try:
         # 1. Plot Actual Historical Data
@@ -295,7 +296,6 @@ def run_prophet_and_plot(df_original, effective_end_date, google_updates, granul
 
 
         # 5. Plot Google Updates
-        # Keep track of labels added to avoid duplicates in legend
         update_labels_added = set()
         for start_str, end_str, label in google_updates:
             try:
@@ -304,16 +304,18 @@ def run_prophet_and_plot(df_original, effective_end_date, google_updates, granul
                 mid_date = start_date + (end_date - start_date) / 2
 
                 # Check if update range overlaps with data range at all
-                if start_date <= historical_data_with_fit['ds'].max() and end_date >= historical_data_with_fit['ds'].min():
+                data_start_date = historical_data_with_fit['ds'].min()
+                data_end_date = full_forecast_df['ds'].max() # Check against full forecast range
+                if start_date <= data_end_date and end_date >= data_start_date:
                     span_label = 'Google Update Period' if label not in update_labels_added else '_nolegend_'
                     ax.axvspan(start_date, end_date, color='lightcoral', alpha=0.25, label=span_label, zorder=0)
-                    update_labels_added.add(label) # Mark as added
+                    update_labels_added.add('Google Update Period') # Mark generic label as added
 
                     # Add text label for the update
                     y_limits = ax.get_ylim()
                     # Place text slightly above the max *actual* value within the plot's current y-limits
                     y_max_in_view = historical_data_with_fit['y'].max() # Consider max actual for positioning text
-                    text_y_pos = (y_limits[1] * 1.02) if y_limits and y_limits[1] > y_limits[0] else (y_max_in_view * 1.05) # Default slightly above max actual
+                    text_y_pos = (y_limits[1] * 1.02) if y_limits and y_limits[1] > y_limits[0] else (y_max_in_view * 1.05 if pd.notna(y_max_in_view) else 0) # Default slightly above max actual
                     ax.text(mid_date, text_y_pos, label, ha='center', va='bottom', fontsize=7, rotation=90, color='dimgray', zorder=4) # Place below top edge
 
             except Exception as plot_err:
@@ -322,13 +324,12 @@ def run_prophet_and_plot(df_original, effective_end_date, google_updates, granul
         ax.set_title(f'{granularity} Actual vs. Prophet Fit & Forecast with Google Updates')
         ax.set_xlabel('Date')
         ax.set_ylabel('Sessions')
-        # Improve legend placement
         ax.legend(loc='upper left', fontsize='small')
         ax.grid(True, linestyle='--', alpha=0.6)
         plt.tight_layout() # Adjust layout
         st.pyplot(fig)
     except Exception as e:
-        st.error(f"Error during plotting ({granularity}): {e}")
+        st.error(f"Error during Matplotlib plotting ({granularity}): {e}")
     finally:
         plt.close(fig) # Ensure figure is closed to free memory
 
@@ -351,7 +352,8 @@ def display_dashboard(full_forecast_df, last_actual_date, forecast_end_date, gra
         st.write("Forecasted Values:")
         st.dataframe(forecast_future[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].astype(
             {'yhat':'int', 'yhat_lower':'int', 'yhat_upper':'int'}
-        ).reset_index(drop=True), height=300) # Set height for scrollable table
+        ).assign(ds=lambda x: x['ds'].dt.strftime('%Y-%m-%d')) # Format date for display
+          .reset_index(drop=True), height=300) # Set height for scrollable table
 
         horizon = len(forecast_future)
         unit_map = {'Daily': 'day', 'Weekly': 'week', 'Monthly': 'month'}
@@ -364,13 +366,13 @@ def display_dashboard(full_forecast_df, last_actual_date, forecast_end_date, gra
         with col1:
             st.metric(label="Last Actual Date", value=f"{last_actual_date.date() if last_actual_date else 'N/A'}")
         with col2:
-            st.metric(label="Forecast Horizon", value=f"{horizon_str}")
+            st.metric(label="Forecast Horizon Shown", value=f"{horizon_str}") # Clarify it's the shown horizon
 
         forecast_value_at_end = forecast_future.iloc[-1]
         forecast_range = int(forecast_value_at_end['yhat_upper'] - forecast_value_at_end['yhat_lower'])
         delta_val = forecast_range / 2
         with col3:
-            st.metric(label=f"Forecast at {forecast_value_at_end['ds'].date()}",
+            st.metric(label=f"Forecast at {forecast_value_at_end['ds'].strftime('%Y-%m-%d')}", # Use formatted date
                       value=int(forecast_value_at_end['yhat']),
                       delta=f"±{delta_val:.0f} (Range: {forecast_range})",
                       delta_color="off")
@@ -379,6 +381,109 @@ def display_dashboard(full_forecast_df, last_actual_date, forecast_end_date, gra
         # Still show last actual date if available
         st.metric(label="Last Actual Date", value=f"{last_actual_date.date() if last_actual_date else 'N/A'}")
 
+# --- HoloViews Animated Forecast Chart Function ---
+def create_gapminder_forecast_chart(forecast_df, last_actual_date, granularity_label):
+    """
+    Creates an animated HoloViews chart visualizing the forecast over time,
+    with point size representing the confidence interval range.
+
+    Args:
+        forecast_df (pd.DataFrame): DataFrame containing Prophet forecast results
+                                    ('ds', 'yhat', 'yhat_lower', 'yhat_upper').
+        last_actual_date (pd.Timestamp): The last date of actual historical data.
+        granularity_label (str): 'Daily', 'Weekly', or 'Monthly' for the title.
+
+    Returns:
+        hv.DynamicMap: The HoloViews animated chart object, or None if error.
+    """
+    try:
+        # Filter for future dates only
+        future_forecast = forecast_df[forecast_df['ds'] > last_actual_date].copy()
+
+        if future_forecast.empty:
+            st.info("ℹ️ No future forecast data points to animate.")
+            return None
+
+        # Prepare data for HoloViews
+        future_forecast['uncertainty'] = (future_forecast['yhat_upper'] - future_forecast['yhat_lower']).clip(lower=1) # Ensure non-negative, min size 1
+        future_forecast['ds_str'] = future_forecast['ds'].dt.strftime('%Y-%m-%d') # For tooltips
+        future_forecast['yhat_int'] = future_forecast['yhat'].round().astype(int)
+        future_forecast['yhat_lower_int'] = future_forecast['yhat_lower'].round().astype(int)
+        future_forecast['yhat_upper_int'] = future_forecast['yhat_upper'].round().astype(int)
+        future_forecast['uncertainty_int'] = (future_forecast['yhat_upper_int'] - future_forecast['yhat_lower_int']).clip(lower=0)
+
+
+        # Define min/max for stable axes and size normalization
+        min_val = future_forecast['yhat_lower'].min()
+        max_val = future_forecast['yhat_upper'].max()
+        min_uncertainty = future_forecast['uncertainty'].min()
+        max_uncertainty = future_forecast['uncertainty'].max()
+
+        # Handle case where uncertainty is constant (avoid division by zero)
+        # Scale uncertainty for point size (adjust base and multiplier as needed)
+        base_size = 5
+        size_multiplier = 25 # Controls how much size varies with uncertainty range
+        if max_uncertainty <= min_uncertainty: # Use <= to handle single point case too
+            # Assign a fixed medium size if uncertainty doesn't vary or only one point
+             future_forecast['size_scaled'] = base_size + size_multiplier / 2 # Example fixed size
+        else:
+            # Normalize uncertainty for point size
+            future_forecast['size_scaled'] = base_size + size_multiplier * (future_forecast['uncertainty'] - min_uncertainty) / (max_uncertainty - min_uncertainty)
+
+        future_forecast['size_scaled'] = future_forecast['size_scaled'].fillna(base_size).round().astype(int) # Handle potential NaNs, ensure integer size
+
+        # Create HoloViews Dataset
+        vdims = ['yhat_int', 'yhat_lower_int', 'yhat_upper_int', 'uncertainty_int', 'size_scaled', 'ds_str']
+        hv_dataset = hv.Dataset(future_forecast, kdims=['ds'], vdims=vdims)
+
+        # Define the points plot using groupby for animation
+        # The inner function defines what to plot for each frame (a single point here)
+        points_animation = hv_dataset.to(hv.Points, kdims=['ds'], vdims=['yhat_int', 'size_scaled'], label="Forecast Point").overlay()
+                                     # Use overlay() to potentially add other static elements later if needed
+
+        # Create tooltips for hover information
+        tooltips = [
+            ('Date', '@ds{%F}'), # Format date directly using Bokeh field codes
+            ('Forecast (yhat)', '@yhat_int'),
+            ('Lower CI', '@yhat_lower_int'),
+            ('Upper CI', '@yhat_upper_int'),
+            ('Uncertainty Range', '@uncertainty_int'),
+            ('Scaled Size', '@size_scaled'),
+        ]
+        hover = hv.HoverTool(tooltips=tooltips, formatters={'@ds': 'datetime'})
+
+
+        # Customize the plot
+        animated_plot = points_animation.opts(
+            hv.opts.Points( # Apply options specifically to Points
+                title=f"Animated {granularity_label} Forecast (Size = Uncertainty Range)",
+                xlabel="Date",
+                ylabel="Forecasted Sessions (yhat)",
+                size='size_scaled', # Use the pre-calculated scaled size
+                color='green',
+                tools=[hover, 'pan', 'wheel_zoom', 'box_zoom', 'reset', 'save'], # Add hover and standard nav tools
+                # hover_cols=['ds_str', 'yhat_int', 'yhat_lower_int', 'yhat_upper_int', 'uncertainty_int'], # Alternative to HoverTool object
+                ylim=(min_val * 0.95, max_val * 1.05) if pd.notna(min_val) and pd.notna(max_val) and min_val < max_val else None, # Stable Y axis, handle NaN/invalid ranges
+                width=800,
+                height=450,
+                xaxis='datetime',
+                # Apply frame-wise normalization if needed, but pre-scaling is often better
+                # size_index='size_scaled', # If size was a vdim and not directly mapped
+                framewise=False, # Render all frames at once for smoother animation (can be slow for huge datasets)
+                # Add animation controls (slider/player)
+                show_legend=False # Legend not very useful for single animated point
+             )
+        )
+
+        return animated_plot
+
+    except ImportError:
+         st.error("🔴 Error: HoloViews or Bokeh is not installed. Please install them (`pip install holoviews bokeh`) to use the animated chart.")
+         return None
+    except Exception as e:
+        st.error(f"🔴 An error occurred while creating the animated forecast chart: {e}")
+        st.error(traceback.format_exc()) # Uncomment for detailed debugging
+        return None
 
 # --- Main Application Logic ---
 def main():
@@ -387,41 +492,48 @@ def main():
     st.write("""
         Upload GA4 sessions CSV ('Date' as YYYYMMDD, 'Sessions').
         Visualize **Actual Traffic** vs. **Prophet's Predicted Fit** for the historical period, overlaid with Google updates.
-        Optionally generate a future forecast and get AI analysis of **historical deviations** correlated with updates.
+        Optionally generate a future forecast, get AI analysis of **historical deviations**, and view an **animated forecast**.
     """)
-    st.info("💡 Ensure CSV has 'Date' (YYYYMMDD format) and 'Sessions' (numeric) columns.")
+    st.info("💡 Ensure CSV has 'Date' (YYYYMMDD format) and 'Sessions' (numeric) columns. You might need to `pip install holoviews bokeh` for the animated chart.")
 
     # --- Define Google Updates List ---
+    # (Use a slightly longer list for better testing)
     google_updates = [
         ('20230315', '20230328', 'Mar 2023 Core Update'), ('20230822', '20230907', 'Aug 2023 Core Update'),
-        ('20230914', '20230928', 'Sept 2023 Helpful Content Update'), ('20231004', '20231019', 'Oct 2023 Core & Spam Updates'),
-        ('20231102', '20231204', 'Nov 2023 Core & Spam Updates'), ('20240305', '20240419', 'Mar 2024 Core Update'),
-        ('20240506', '20240507', 'Site Rep Abuse'), ('20240514', '20240515', 'AI Overviews'),
-        ('20240620', '20240627', 'June 2024 Core Update'), ('20240815', '20240903', 'Aug 2024 Core Update'),
-        ('20241111', '20241205', 'Nov 2024 Core Update'), ('20241212', '20241218', 'Dec 2024 Core Update'),
-        ('20241219', '20241226', 'Dec 2024 Spam Update'), ('20250313', '20250327', 'Mar 2025 Core Update')
+        ('20230914', '20230928', 'Sept 2023 Helpful Content Update'), ('20231004', '20231019', 'Oct 2023 Spam Update'),
+        ('20231005', '20231019', 'Oct 2023 Core Update'), # Overlapping example
+        ('20231102', '20231128', 'Nov 2023 Core Update'), ('20231108', '20231117', 'Nov 2023 Reviews Update'),
+        ('20240305', '20240419', 'Mar 2024 Core Update'), ('20240305', '20240320', 'Mar 2024 Spam Update'),
+        ('20240425', '20240425', 'Apr 2024 Reviews System Change'), # Single day
+        ('20240505', '20240505', 'May 2024 Site Reputation Abuse'),
+        ('20240506', '20240507', 'Site Rep Abuse'), ('20240514', '20240515', 'AI Overviews'), # Placeholder dates
+        ('20240620', '20240627', 'June 2024 Core Update'), # Placeholder dates
+        ('20240815', '20240903', 'Aug 2024 Core Update'), # Placeholder dates
+        # ('20241111', '20241205', 'Nov 2024 Core Update'), # Placeholder dates
+        # ('20241212', '20241218', 'Dec 2024 Core Update'), # Placeholder dates
+        # ('20241219', '20241226', 'Dec 2024 Spam Update'), # Placeholder dates
+        # ('20250313', '20250327', 'Mar 2025 Core Update') # Placeholder dates
     ]
 
     # --- Sidebar Controls ---
     granularity = st.sidebar.radio("Select Analysis Granularity", ("Daily", "Weekly", "Monthly"), key="granularity_radio")
     show_future_forecast = st.sidebar.checkbox("Include Future Forecast?", value=True, key="show_future_cb")
 
-    forecast_end_date = None # Initialize
-    user_selected_forecast_end_date = None # Store the user's choice if forecast is on
+    user_selected_forecast_end_date = None # Initialize
 
     if show_future_forecast:
         default_forecast_end = (pd.Timestamp.today() + timedelta(days=90)).date()
-        # Ensure min_date is at least one day after today
-        min_date_allowed = max(pd.Timestamp.today().date() + timedelta(days=1), default_forecast_end) # Ensure default is valid too if today+90 is past
-        # Allow user to select date only if checkbox is ticked
+        # Min date should allow forecasting from tomorrow onwards
+        min_date_allowed = pd.Timestamp.today().date() + timedelta(days=1)
         forecast_end_date_input = st.sidebar.date_input(
             "Select Forecast End Date",
             value=default_forecast_end,
             min_value=min_date_allowed,
-            key="forecast_date_input",
-            disabled=not show_future_forecast
+            key="forecast_date_input" # No need for disabled, logic handles it
         )
         user_selected_forecast_end_date = pd.to_datetime(forecast_end_date_input)
+    else:
+         st.sidebar.caption("Forecasting disabled.") # Indicate why date input might seem missing
 
 
     # --- File Upload ---
@@ -430,7 +542,6 @@ def main():
     # --- Main Processing Area ---
     if df_original is not None:
         st.subheader("Data Preview (First 5 Rows)")
-        # Show Date in YYYY-MM-DD format for preview
         st.dataframe(df_original.head().assign(Date=lambda x: x['Date'].dt.strftime('%Y-%m-%d')))
 
         # --- Run Prophet & Plotting ---
@@ -444,10 +555,10 @@ def main():
         # Determine the effective end date for the Prophet run
         # If forecast is off, predict only up to the last actual date
         # If forecast is on, use the user-selected future date
-        effective_end_date_for_prophet = user_selected_forecast_end_date if show_future_forecast else df_original['Date'].max()
+        effective_end_date_for_prophet = user_selected_forecast_end_date if show_future_forecast and user_selected_forecast_end_date else df_original['Date'].max()
 
         try:
-            with st.spinner(f"Running Prophet ({granularity}) and generating plot..."):
+            with st.spinner(f"Running Prophet ({granularity}) and generating static plot..."):
                 results = run_prophet_and_plot(
                     df_original.copy(),
                     effective_end_date_for_prophet, # Use the determined end date
@@ -471,7 +582,6 @@ def main():
 
         if not api_key_present:
             st.warning("⚠️ GOOGLE_API_KEY environment variable not set. AI analysis disabled.")
-        # Check if historical fit data is available for analysis
         elif historical_data_with_fit is None or historical_data_with_fit.empty:
              st.warning("⚠️ Cannot perform AI analysis: Historical data with Prophet fit not available (Prophet modeling might have failed).")
         else:
@@ -487,21 +597,44 @@ def main():
                     st.markdown(deviation_analysis_result)
                 # else: configure_gemini would have shown an error if it failed
 
-        # --- Display Future Forecast Dashboard (if requested and successful) ---
-        st.markdown("---") # Separator before optional dashboard
+        # --- Display Future Forecast Dashboard & Animated Chart Section ---
+        st.markdown("---") # Separator before optional dashboard/animation
         if show_future_forecast:
-            if full_forecast_df is not None and last_actual_date is not None:
-                 # Pass the user selected end date for filtering the dashboard view
-                 display_dashboard(full_forecast_df, last_actual_date, user_selected_forecast_end_date, granularity)
-            else:
-                st.info("Future forecast could not be generated or displayed.")
+            if full_forecast_df is not None and last_actual_date is not None and user_selected_forecast_end_date is not None:
+                # 1. Display the summary dashboard FIRST
+                display_dashboard(full_forecast_df, last_actual_date, user_selected_forecast_end_date, granularity)
+
+                # 2. Add the Animated HoloViews Chart section
+                st.subheader(f"🎬 Animated {granularity} Forecast Visualization")
+                st.write("""
+                    This chart shows the forecasted value (`yhat`) progressing over time.
+                    The *size* of the point represents the width of the 80% confidence interval (uncertainty: `yhat_upper` - `yhat_lower`) for that point.
+                    Hover over points for details. Use the slider/play button below the chart to navigate through time.
+                """)
+                with st.spinner("Generating animated forecast chart..."):
+                    animated_chart = create_gapminder_forecast_chart(full_forecast_df, last_actual_date, granularity)
+
+                if animated_chart:
+                    try:
+                        # Use st.bokeh_chart to render HoloViews object with Bokeh backend
+                        # Render the HoloViews object to a Bokeh figure/layout
+                        bokeh_plot = hv.render(animated_chart, backend='bokeh')
+                        st.bokeh_chart(bokeh_plot, use_container_width=True)
+                    except Exception as render_err:
+                         st.error(f"🔴 Error rendering the animated chart: {render_err}")
+                         st.error(traceback.format_exc()) # More detail on rendering error
+                # else: Error message shown within create_gapminder_forecast_chart
+
+            elif full_forecast_df is None or last_actual_date is None:
+                 st.warning("Future forecast could not be generated (required for dashboard & animated chart). Check previous errors.")
+            elif user_selected_forecast_end_date is None:
+                 st.warning("Future forecast end date not properly set.")
         else:
-            st.caption("Future forecast display disabled via sidebar option.")
+            st.caption("Future forecast display disabled via sidebar option (dashboard & animated chart also disabled).")
 
 
     else:
         # Show message if no file uploaded
-        # Check session state for the uploader key to avoid showing after upload attempt fails
         uploader_state = st.session_state.get("ga4_csv_uploader")
         if uploader_state is None:
               st.info("Awaiting CSV file upload...")
