@@ -8,3 +8,4 @@ prophet
 google-generativeai
 holoviews
 bokeh
+streamlit-bokeh
