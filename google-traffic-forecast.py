@@ -160,30 +160,44 @@ def run_prophet_and_plot(df_original, effective_end_date, google_updates, granul
     return forecast, hist_fit, last_actual_date
 
 # --- Animated Forecast with Plotly Express ---
-def plot_animated_forecast(full_forecast_df, google_updates):
+def plot_animated_forecast(hist_fit_df, full_forecast_df, google_updates):
     """
-    Animated, cumulative build-up of actual vs. forecast,
+    Animated cumulative chart of actual vs. forecast,
     with Google algorithm update overlays.
+    
+    hist_fit_df   : DataFrame with columns ['ds','y','yhat'] for historical dates.
+    full_forecast_df : DataFrame with ['ds','yhat'] covering history+future.
     """
-    # 1) Sort & build cumulative frames
-    df = full_forecast_df.sort_values('ds').copy()
+    # 1) Build combined df: historical (y + yhat) + future (yhat only)
+    last_hist = hist_fit_df['ds'].max()
+    future_only = (
+        full_forecast_df[full_forecast_df['ds'] > last_hist]
+        [['ds','yhat']]
+        .assign(y=pd.NA)
+    )
+    combined = pd.concat(
+        [hist_fit_df[['ds','y','yhat']], future_only],
+        ignore_index=True
+    ).sort_values('ds')
+
+    # 2) Build cumulative frames
     frames = []
-    for T in df['ds']:
-        sub = df[df['ds'] <= T].copy()
+    for T in combined['ds'].unique():
+        sub = combined[combined['ds'] <= T].copy()
         sub['frame'] = T.strftime("%Y-%m-%d")
         frames.append(sub)
     anim_df = pd.concat(frames, ignore_index=True)
 
-    # 2) Melt to long form for Plotly Express
+    # 3) Melt into long form
     anim_long = anim_df.melt(
-        id_vars=['ds', 'frame'],
-        value_vars=['y', 'yhat'],
+        id_vars=['ds','frame'],
+        value_vars=['y','yhat'],
         var_name='Type',
         value_name='Sessions'
     )
-    anim_long['Type'] = anim_long['Type'].map({'y':'Actual', 'yhat':'Forecast'})
+    anim_long['Type'] = anim_long['Type'].map({'y':'Actual','yhat':'Forecast'})
 
-    # 3) Build the animated figure
+    # 4) Plotly Express animation
     fig = px.line(
         anim_long,
         x='ds',
@@ -191,49 +205,42 @@ def plot_animated_forecast(full_forecast_df, google_updates):
         color='Type',
         animation_frame='frame',
         animation_group='Type',
-        labels={'ds':'Date', 'Sessions':'Sessions', 'Type':''},
+        labels={'ds':'Date','Sessions':'Sessions','Type':''},
         title='Actual vs. Forecast Animation'
     )
     fig.update_traces(mode='lines+markers')
 
-    # 4) Lock axes range
-    y_min = anim_long['Sessions'].min()
-    y_max = anim_long['Sessions'].max()
+    # 5) Lock axes
+    y_min = anim_long['Sessions'].min(skipna=True)
+    y_max = anim_long['Sessions'].max(skipna=True)
     fig.update_layout(
-        xaxis=dict(range=[df['ds'].min(), df['ds'].max()]),
+        xaxis=dict(range=[combined['ds'].min(), combined['ds'].max()]),
         yaxis=dict(range=[y_min, y_max]),
         legend=dict(title_text='')
     )
 
-    # 5) Add Google‐update spans
+    # 6) Add Google‐update spans
     shapes = []
     for start_str, end_str, label in google_updates:
         sd = pd.to_datetime(start_str, format='%Y%m%d')
         ed = pd.to_datetime(end_str,   format='%Y%m%d')
         shapes.append({
-            'type': 'rect',
-            'xref': 'x', 'yref': 'paper',
-            'x0': sd,   'x1': ed,
-            'y0': 0,    'y1': 1,
-            'fillcolor': 'LightCoral',
-            'opacity': 0.2,
-            'layer': 'below',
-            'line_width': 0,
+            'type':'rect','xref':'x','yref':'paper',
+            'x0':sd,'x1':ed,'y0':0,'y1':1,
+            'fillcolor':'LightCoral','opacity':0.2,'layer':'below','line_width':0
         })
         fig.add_annotation({
-            'x': sd + (ed - sd) / 2,
-            'y': 1.02,
-            'xref': 'x', 'yref': 'paper',
-            'text': label,
-            'showarrow': False,
-            'font': {'size': 9, 'color': 'DimGray'},
-            'textangle': -90,
+            'x': sd + (ed-sd)/2,
+            'y': 1.02, 'xref':'x','yref':'paper',
+            'text': label, 'showarrow':False,
+            'font':{'size':9,'color':'DimGray'}, 'textangle':-90
         })
     fig.update_layout(shapes=shapes)
 
-    # 6) Render in Streamlit
+    # 7) Render
     st.subheader("🎞️ Animated Actual vs. Forecast with Google Updates")
     st.plotly_chart(fig, use_container_width=True)
+
 
 
 # --- Future Forecast Dashboard Display ---
@@ -343,7 +350,7 @@ def main():
 
     st.markdown("---")
     if full_forecast_df is not None:
-        plot_animated_forecast(full_forecast_df, google_updates)
+        plot_animated_forecast(hist_fit_df, full_forecast_df, google_updates)
 
     st.markdown("---")
     if show_future_forecast and full_forecast_df is not None and last_actual_date is not None:
