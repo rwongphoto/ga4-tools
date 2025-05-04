@@ -382,6 +382,7 @@ def display_dashboard(full_forecast_df, last_actual_date, forecast_end_date, gra
         st.metric(label="Last Actual Date", value=f"{last_actual_date.date() if last_actual_date else 'N/A'}")
 
 # --- HoloViews Animated Forecast Chart Function ---
+# --- HoloViews Animated Forecast Chart Function ---
 def create_gapminder_forecast_chart(forecast_df, last_actual_date, granularity_label):
     """
     Creates an animated HoloViews chart visualizing the forecast over time,
@@ -394,7 +395,8 @@ def create_gapminder_forecast_chart(forecast_df, last_actual_date, granularity_l
         granularity_label (str): 'Daily', 'Weekly', or 'Monthly' for the title.
 
     Returns:
-        hv.DynamicMap: The HoloViews animated chart object, or None if error.
+        hv.Points: The HoloViews chart object, or None if error.
+                   Changed return type slightly as it's primarily Points.
     """
     try:
         # Filter for future dates only
@@ -404,9 +406,12 @@ def create_gapminder_forecast_chart(forecast_df, last_actual_date, granularity_l
             st.info("ℹ️ No future forecast data points to animate.")
             return None
 
-        # Prepare data for HoloViews
+        # --- Prepare data for HoloViews ---
+        # Ensure 'ds' is datetime
+        future_forecast['ds'] = pd.to_datetime(future_forecast['ds'])
+
         future_forecast['uncertainty'] = (future_forecast['yhat_upper'] - future_forecast['yhat_lower']).clip(lower=1) # Ensure non-negative, min size 1
-        future_forecast['ds_str'] = future_forecast['ds'].dt.strftime('%Y-%m-%d') # For tooltips
+        future_forecast['ds_str'] = future_forecast['ds'].dt.strftime('%Y-%m-%d') # For tooltips if needed elsewhere
         future_forecast['yhat_int'] = future_forecast['yhat'].round().astype(int)
         future_forecast['yhat_lower_int'] = future_forecast['yhat_lower'].round().astype(int)
         future_forecast['yhat_upper_int'] = future_forecast['yhat_upper'].round().astype(int)
@@ -419,59 +424,53 @@ def create_gapminder_forecast_chart(forecast_df, last_actual_date, granularity_l
         min_uncertainty = future_forecast['uncertainty'].min()
         max_uncertainty = future_forecast['uncertainty'].max()
 
-        # Handle case where uncertainty is constant (avoid division by zero)
         # Scale uncertainty for point size (adjust base and multiplier as needed)
         base_size = 5
         size_multiplier = 25 # Controls how much size varies with uncertainty range
         if max_uncertainty <= min_uncertainty: # Use <= to handle single point case too
-            # Assign a fixed medium size if uncertainty doesn't vary or only one point
-             future_forecast['size_scaled'] = base_size + size_multiplier / 2 # Example fixed size
+             future_forecast['size_scaled'] = base_size + size_multiplier / 2
         else:
-            # Normalize uncertainty for point size
             future_forecast['size_scaled'] = base_size + size_multiplier * (future_forecast['uncertainty'] - min_uncertainty) / (max_uncertainty - min_uncertainty)
 
-        future_forecast['size_scaled'] = future_forecast['size_scaled'].fillna(base_size).round().astype(int) # Handle potential NaNs, ensure integer size
+        future_forecast['size_scaled'] = future_forecast['size_scaled'].fillna(base_size).round().astype(int)
 
-        # Create HoloViews Dataset
-        vdims = ['yhat_int', 'yhat_lower_int', 'yhat_upper_int', 'uncertainty_int', 'size_scaled', 'ds_str']
-        hv_dataset = hv.Dataset(future_forecast, kdims=['ds'], vdims=vdims)
+        # --- Create HoloViews Points Element ---
+        # Define Key Dimensions (kdims) - MUST be exactly 2 for hv.Points (X, Y)
+        kdims = ['ds', 'yhat_int']
+        # Define Value Dimensions (vdims) - Extra info associated with each point
+        vdims = ['yhat_lower_int', 'yhat_upper_int', 'uncertainty_int', 'size_scaled', 'ds_str']
 
-        # Define the points plot using groupby for animation
-        # The inner function defines what to plot for each frame (a single point here)
-        points_animation = hv_dataset.to(hv.Points, kdims=['ds'], vdims=['yhat_int', 'size_scaled'], label="Forecast Point").overlay()
-                                     # Use overlay() to potentially add other static elements later if needed
+        # Create the Points element directly from the dataframe
+        # HoloViews will automatically make 'ds' the slider dimension because it's the first kdim
+        points_plot = hv.Points(future_forecast, kdims=kdims, vdims=vdims, label="Forecast Point")
 
         # Create tooltips for hover information
         tooltips = [
-            ('Date', '@ds{%F}'), # Format date directly using Bokeh field codes
-            ('Forecast (yhat)', '@yhat_int'),
-            ('Lower CI', '@yhat_lower_int'),
-            ('Upper CI', '@yhat_upper_int'),
-            ('Uncertainty Range', '@uncertainty_int'),
-            ('Scaled Size', '@size_scaled'),
+            ('Date', '@ds{%F}'),             # Reference kdim 'ds', format as Date
+            ('Forecast (yhat)', '@yhat_int'), # Reference kdim 'yhat_int'
+            ('Lower CI', '@yhat_lower_int'),   # Reference vdim
+            ('Upper CI', '@yhat_upper_int'),   # Reference vdim
+            ('Uncertainty Range', '@uncertainty_int'), # Reference vdim
+            ('Scaled Size', '@size_scaled'),   # Reference vdim
         ]
-        hover = hv.HoverTool(tooltips=tooltips, formatters={'@ds': 'datetime'})
+        hover = hv.HoverTool(tooltips=tooltips, formatters={'@ds': 'datetime'}) # Datetime formatter for ds
 
-
-        # Customize the plot
-        animated_plot = points_animation.opts(
+        # Customize the plot using .opts
+        animated_plot = points_plot.opts(
             hv.opts.Points( # Apply options specifically to Points
                 title=f"Animated {granularity_label} Forecast (Size = Uncertainty Range)",
                 xlabel="Date",
                 ylabel="Forecasted Sessions (yhat)",
-                size='size_scaled', # Use the pre-calculated scaled size
+                size='size_scaled', # Map the size aesthetic to the 'size_scaled' vdim
                 color='green',
-                tools=[hover, 'pan', 'wheel_zoom', 'box_zoom', 'reset', 'save'], # Add hover and standard nav tools
-                # hover_cols=['ds_str', 'yhat_int', 'yhat_lower_int', 'yhat_upper_int', 'uncertainty_int'], # Alternative to HoverTool object
-                ylim=(min_val * 0.95, max_val * 1.05) if pd.notna(min_val) and pd.notna(max_val) and min_val < max_val else None, # Stable Y axis, handle NaN/invalid ranges
+                alpha=0.7, # Make points slightly transparent if they overlap
+                tools=[hover, 'pan', 'wheel_zoom', 'box_zoom', 'reset', 'save'],
+                ylim=(min_val * 0.95, max_val * 1.05) if pd.notna(min_val) and pd.notna(max_val) and min_val < max_val else None,
                 width=800,
                 height=450,
-                xaxis='datetime',
-                # Apply frame-wise normalization if needed, but pre-scaling is often better
-                # size_index='size_scaled', # If size was a vdim and not directly mapped
-                framewise=False, # Render all frames at once for smoother animation (can be slow for huge datasets)
-                # Add animation controls (slider/player)
-                show_legend=False # Legend not very useful for single animated point
+                xaxis='datetime', # Ensure x-axis is treated as datetime
+                # HoloViews handles slider automatically based on the first kdim ('ds')
+                show_legend=False
              )
         )
 
@@ -482,7 +481,7 @@ def create_gapminder_forecast_chart(forecast_df, last_actual_date, granularity_l
          return None
     except Exception as e:
         st.error(f"🔴 An error occurred while creating the animated forecast chart: {e}")
-        st.error(traceback.format_exc()) # Uncomment for detailed debugging
+        st.error(traceback.format_exc()) # Keep traceback for debugging this kind of error
         return None
 
 # --- Main Application Logic ---
