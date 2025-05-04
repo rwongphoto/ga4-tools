@@ -161,21 +161,42 @@ def run_prophet_and_plot(df_original, effective_end_date, google_updates, granul
 
 # --- Animated Forecast with Plotly Express ---
 def plot_animated_forecast(full_forecast_df):
-    df = full_forecast_df.copy()
-    df['frame'] = df['ds'].dt.strftime('%Y-%m-%d')
+    """
+    Renders an animated, cumulative line chart of Prophet's yhat over time.
+    """
+    # 1) Make sure it's sorted
+    df = full_forecast_df.sort_values('ds').copy()
+    
+    # 2) Build cumulative frames
+    frames = []
+    for T in df['ds']:
+        sub = df[df['ds'] <= T].copy()
+        sub['frame'] = T.strftime("%Y-%m-%d")
+        frames.append(sub)
+    anim_df = pd.concat(frames, ignore_index=True)
+
+    # 3) Create the animated Plotly figure
     fig = px.line(
-        df, x='ds', y='yhat',
-        animation_frame='frame', animation_group='yhat',
-        labels={'ds':'Date','yhat':'Forecasted Sessions'},
+        anim_df,
+        x='ds',
+        y='yhat',
+        animation_frame='frame',
+        labels={'ds': 'Date', 'yhat': 'Forecasted Sessions'},
         title='Prophet Forecast Animation'
     )
+    # show markers + line
+    fig.update_traces(mode='lines+markers')
+    # lock the axes so they don't rescale every frame
     fig.update_layout(
         xaxis=dict(range=[df['ds'].min(), df['ds'].max()]),
         yaxis=dict(range=[df['yhat'].min(), df['yhat'].max()]),
         legend=dict(title_text='')
     )
+
+    # 4) Render in Streamlit
     st.subheader("🎞️ Animated Forecast Over Time")
     st.plotly_chart(fig, use_container_width=True)
+
 
 # --- Future Forecast Dashboard Display ---
 def display_dashboard(full_forecast_df, last_actual_date, forecast_end_date, granularity_label):
