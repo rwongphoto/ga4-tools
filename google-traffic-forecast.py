@@ -130,87 +130,30 @@ def run_prophet_and_plot(df_original, effective_end_date, google_updates, granul
         on='ds', how='left'
     )
 
-    # --- Static Matplotlib plot (updated for readability) ---
-    fig, ax = plt.subplots(figsize=(16, 9))
+    # Static Matplotlib plot
+    fig, ax = plt.subplots(figsize=(16,9))
+    ax.plot(hist_fit['ds'], hist_fit['y'], marker='.', label='Actual')
+    ax.plot(hist_fit['ds'], hist_fit['yhat'], linestyle=':', label='Fit')
+    future_part = forecast[forecast['ds'] > last_actual_date]
+    if not future_part.empty:
+        ax.plot(future_part['ds'], future_part['yhat'], linestyle='--', label='Forecast')
+    ax.fill_between(forecast['ds'], forecast['yhat_lower'], forecast['yhat_upper'],
+                    alpha=0.3, label='CI (80%)')
 
-    # 1. Historical Actuals (blue circles + line)
-    ax.plot(
-        historical_data_with_fit['ds'],
-        historical_data_with_fit['y'],
-        label='Actual',
-        marker='o',
-        markersize=4,
-        linewidth=1.5,
-        alpha=0.8
-    )
-
-    # 2. Prophet Fit (orange squares + dashed line)
-    ax.plot(
-        historical_data_with_fit['ds'],
-        historical_data_with_fit['yhat'],
-        label='Fit',
-        marker='s',
-        markersize=4,
-        linewidth=1.5,
-        linestyle='--',
-        alpha=0.8
-    )
-
-    # 3. Future Forecast (green triangles + dash-dot)
-    if not future_forecast_part.empty:
-        ax.plot(
-            future_forecast_part['ds'],
-            future_forecast_part['yhat'],
-            label='Forecast',
-            marker='^',
-            markersize=4,
-            linewidth=1.5,
-            linestyle='-.',
-            alpha=0.8
-        )
-
-    # 4. Confidence Interval (light grey fill)
-    ax.fill_between(
-        full_forecast_df['ds'],
-        full_forecast_df['yhat_lower'],
-        full_forecast_df['yhat_upper'],
-        color='lightgrey',
-        alpha=0.4,
-        label='80% Confidence Interval'
-    )
-
-    # 5. Google Update Spans (pale red bands + labels)
+    # Plot Google update spans
     added = set()
-    for start_str, end_str, label in google_updates:
-        sd = pd.to_datetime(start_str, format='%Y%m%d')
-        ed = pd.to_datetime(end_str, format='%Y%m%d')
-        if sd <= historical_data_with_fit['ds'].max() and ed >= historical_data_with_fit['ds'].min():
-            if label not in added:
-                ax.axvspan(sd, ed, color='lightcoral', alpha=0.2, label='Google Update')
-                added.add(label)
-            else:
-                ax.axvspan(sd, ed, color='lightcoral', alpha=0.2)
-            # annotation
-            ax.text(
-                sd + (ed - sd) / 2,
-                historical_data_with_fit['y'].max() * 1.02,
-                label,
-                rotation=90,
-                fontsize=8,
-                color='dimgray',
-                ha='center'
-            )
+    for s,e,label in google_updates:
+        sd, ed = pd.to_datetime(s, format='%Y%m%d'), pd.to_datetime(e, format='%Y%m%d')
+        if sd <= hist_fit['ds'].max() and ed >= hist_fit['ds'].min():
+            span_label = 'Google Update' if label not in added else '_nolegend_'
+            ax.axvspan(sd, ed, color='lightcoral', alpha=0.2, label=span_label)
+            ax.text(sd + (ed-sd)/2, hist_fit['y'].max()*1.02, label,
+                    rotation=90, fontsize=7, ha='center')
+            added.add(label)
 
-    # 6. Aesthetics
-    ax.set_title(f"{granularity} Actual vs. Prophet Fit & Forecast", fontsize=16, pad=16)
-    ax.set_xlabel("Date", fontsize=14)
-    ax.set_ylabel("Sessions", fontsize=14)
-    ax.legend(fontsize=12, loc='upper left')
-    ax.grid(True, linestyle='--', alpha=0.5)
-    plt.xticks(rotation=45, ha='right')
-    plt.tight_layout()
-
-    # 7. Render
+    ax.set_title(f"{granularity} Actual vs. Prophet Fit & Forecast")
+    ax.set_xlabel("Date"); ax.set_ylabel("Sessions")
+    ax.legend(loc='upper left'); ax.grid(True, linestyle='--', alpha=0.6)
     st.pyplot(fig)
     plt.close(fig)
 
