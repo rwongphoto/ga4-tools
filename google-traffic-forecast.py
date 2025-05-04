@@ -179,37 +179,48 @@ def plot_animated_forecast(full_forecast_df):
 
 # --- Future Forecast Dashboard Display ---
 def display_dashboard(full_forecast_df, last_actual_date, forecast_end_date, granularity_label):
-    """Displays table and summary for the FUTURE forecast part."""
+    """
+    Displays the FUTURE forecast table and summary metrics.
+    Converts dates to strings so st.metric accepts them.
+    """
     st.subheader(f"Future Forecast Summary ({granularity_label})")
+
+    # Filter only the future portion of the forecast
     future_df = full_forecast_df[
         (full_forecast_df['ds'] > last_actual_date) &
         (full_forecast_df['ds'] <= forecast_end_date)
     ].copy()
+
     if not future_df.empty:
         st.write("Forecasted Values:")
         st.dataframe(
-            future_df[['ds','yhat','yhat_lower','yhat_upper']]
-            .astype({'yhat':'int','yhat_lower':'int','yhat_upper':'int'})
+            future_df[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
+            .astype({'yhat':'int', 'yhat_lower':'int', 'yhat_upper':'int'})
+            .rename(columns={'ds':'Date', 'yhat':'Forecast', 'yhat_lower':'Lower CI', 'yhat_upper':'Upper CI'})
             .reset_index(drop=True),
             height=300
         )
+
+        # Summary metrics in three columns
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Last Actual Date", last_actual_date.date())
+            # Convert date to string
+            st.metric("Last Actual Date", last_actual_date.strftime("%Y-%m-%d"))
         with col2:
             horizon = len(future_df)
-            unit = {'Daily':'day','Weekly':'week','Monthly':'month'}[granularity_label]
-            st.metric("Forecast Horizon", f"{horizon} {unit}{'s' if horizon!=1 else ''}")
+            unit = {'Daily':'day', 'Weekly':'week', 'Monthly':'month'}[granularity_label]
+            st.metric("Forecast Horizon", f"{horizon} {unit}{'s' if horizon != 1 else ''}")
         with col3:
-            end_row = future_df.iloc[-1]
-            rng = end_row['yhat_upper'] - end_row['yhat_lower']
+            last_row = future_df.iloc[-1]
+            rng = last_row['yhat_upper'] - last_row['yhat_lower']
             st.metric(
-                f"Forecast at {end_row['ds'].date()}",
-                int(end_row['yhat']),
+                f"Forecast at {last_row['ds'].strftime('%Y-%m-%d')}",
+                int(last_row['yhat']),
                 delta=f"±{int(rng/2)} (Range: {int(rng)})"
             )
     else:
-        st.info("No future points within selected date range.")
+        st.info("No forecast points fall within the selected date range.")
+
 
 # --- Main Application ---
 def main():
