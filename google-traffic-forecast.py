@@ -407,7 +407,8 @@ def create_gapminder_forecast_chart(forecast_df, last_actual_date, granularity_l
         # --- Prepare data for HoloViews ---
         future_forecast['ds'] = pd.to_datetime(future_forecast['ds'])
         future_forecast['uncertainty'] = (future_forecast['yhat_upper'] - future_forecast['yhat_lower']).clip(lower=1)
-        future_forecast['ds_str'] = future_forecast['ds'].dt.strftime('%Y-%m-%d') # Keep just in case, though formatter is better
+        # ds_str might not be strictly needed if formatters work, but doesn't hurt
+        future_forecast['ds_str'] = future_forecast['ds'].dt.strftime('%Y-%m-%d')
         future_forecast['yhat_int'] = future_forecast['yhat'].round().astype(int)
         future_forecast['yhat_lower_int'] = future_forecast['yhat_lower'].round().astype(int)
         future_forecast['yhat_upper_int'] = future_forecast['yhat_upper'].round().astype(int)
@@ -429,25 +430,21 @@ def create_gapminder_forecast_chart(forecast_df, last_actual_date, granularity_l
 
         # --- Create HoloViews Points Element ---
         kdims = ['ds', 'yhat_int']
-        vdims = ['yhat_lower_int', 'yhat_upper_int', 'uncertainty_int', 'size_scaled', 'ds_str'] # ds_str still useful as a vdim reference maybe
+        vdims = ['yhat_lower_int', 'yhat_upper_int', 'uncertainty_int', 'size_scaled', 'ds_str']
         points_plot = hv.Points(future_forecast, kdims=kdims, vdims=vdims, label="Forecast Point")
 
         # --- Define Tooltips and Formatters ---
-        # Define tooltips referencing columns (kdims or vdims) in the hv.Points data
         tooltips = [
-            ('Date', '@ds{%F}'),             # Use Bokeh field formatting for date kdim
-            ('Forecast (yhat)', '@yhat_int'), # Reference yhat_int kdim
-            ('Lower CI', '@yhat_lower_int'),   # Reference vdim
-            ('Upper CI', '@yhat_upper_int'),   # Reference vdim
-            ('Uncertainty Range', '@uncertainty_int'), # Reference vdim
-            ('Scaled Size', '@size_scaled'),   # Reference vdim
+            ('Date', '@ds{%F}'),
+            ('Forecast (yhat)', '@yhat_int'),
+            ('Lower CI', '@yhat_lower_int'),
+            ('Upper CI', '@yhat_upper_int'),
+            ('Uncertainty Range', '@uncertainty_int'),
+            ('Scaled Size', '@size_scaled'),
         ]
-        # Define formatters for specific fields, like dates
         formatters = {'@ds': 'datetime'}
 
         # --- Customize the plot using .opts ---
-        # REMOVED: hover = hv.HoverTool(...) - Incorrect way
-
         animated_plot = points_plot.opts(
             hv.opts.Points(
                 title=f"Animated {granularity_label} Forecast (Size = Uncertainty Range)",
@@ -456,10 +453,10 @@ def create_gapminder_forecast_chart(forecast_df, last_actual_date, granularity_l
                 size='size_scaled',
                 color='green',
                 alpha=0.7,
-                # Include 'hover' in the tools list to enable it
                 tools=['hover', 'pan', 'wheel_zoom', 'box_zoom', 'reset', 'save'],
-                # Pass tooltips and formatters directly to opts
-                tooltips=tooltips,
+                # *** Use the correct option name suggested by the error message ***
+                hover_tooltips=tooltips,
+                # Keep formatters here, it's often associated with hover tool config
                 formatters=formatters,
                 ylim=(min_val * 0.95, max_val * 1.05) if pd.notna(min_val) and pd.notna(max_val) and min_val < max_val else None,
                 width=800,
