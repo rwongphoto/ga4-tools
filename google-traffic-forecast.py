@@ -162,43 +162,50 @@ def run_prophet_and_plot(df_original, effective_end_date, google_updates, granul
 # --- Animated Forecast with Plotly Express ---
 def plot_animated_forecast(full_forecast_df, google_updates):
     """
-    Animated, cumulative build‐up of actual vs. forecast,
-    with Google‐algorithm‐update overlays.
+    Animated, cumulative build-up of actual vs. forecast,
+    with Google algorithm update overlays.
     """
-    # 1) Sort once
+    # 1) Sort & build cumulative frames
     df = full_forecast_df.sort_values('ds').copy()
-    
-    # 2) Build cumulative frames so each frame shows all points up to that date
     frames = []
     for T in df['ds']:
         sub = df[df['ds'] <= T].copy()
         sub['frame'] = T.strftime("%Y-%m-%d")
         frames.append(sub)
     anim_df = pd.concat(frames, ignore_index=True)
-    
-    # 3) Create the Plotly Express figure with two series
+
+    # 2) Melt to long form for Plotly Express
+    anim_long = anim_df.melt(
+        id_vars=['ds', 'frame'],
+        value_vars=['y', 'yhat'],
+        var_name='Type',
+        value_name='Sessions'
+    )
+    anim_long['Type'] = anim_long['Type'].map({'y':'Actual', 'yhat':'Forecast'})
+
+    # 3) Build the animated figure
     fig = px.line(
-        anim_df,
+        anim_long,
         x='ds',
-        y=['y', 'yhat'],                  # actual and forecast
+        y='Sessions',
+        color='Type',
         animation_frame='frame',
-        animation_group='yhat',
-        labels={'ds':'Date', 'value':'Sessions', 'variable':''},
+        animation_group='Type',
+        labels={'ds':'Date', 'Sessions':'Sessions', 'Type':''},
         title='Actual vs. Forecast Animation'
     )
-    # show markers + lines
     fig.update_traces(mode='lines+markers')
-    
-    # 4) Lock the axes to full range of both series
-    y_min = anim_df[['y','yhat']].min().min()
-    y_max = anim_df[['y','yhat']].max().max()
+
+    # 4) Lock axes range
+    y_min = anim_long['Sessions'].min()
+    y_max = anim_long['Sessions'].max()
     fig.update_layout(
         xaxis=dict(range=[df['ds'].min(), df['ds'].max()]),
         yaxis=dict(range=[y_min, y_max]),
         legend=dict(title_text='')
     )
-    
-    # 5) Add Google update spans as background shapes + annotations
+
+    # 5) Add Google‐update spans
     shapes = []
     for start_str, end_str, label in google_updates:
         sd = pd.to_datetime(start_str, format='%Y%m%d')
@@ -213,10 +220,9 @@ def plot_animated_forecast(full_forecast_df, google_updates):
             'layer': 'below',
             'line_width': 0,
         })
-        # annotation above the plot
         fig.add_annotation({
-            'x': sd + (ed-sd)/2,
-            'y': 1.02,               # just above top of plot area
+            'x': sd + (ed - sd) / 2,
+            'y': 1.02,
             'xref': 'x', 'yref': 'paper',
             'text': label,
             'showarrow': False,
@@ -224,7 +230,7 @@ def plot_animated_forecast(full_forecast_df, google_updates):
             'textangle': -90,
         })
     fig.update_layout(shapes=shapes)
-    
+
     # 6) Render in Streamlit
     st.subheader("🎞️ Animated Actual vs. Forecast with Google Updates")
     st.plotly_chart(fig, use_container_width=True)
