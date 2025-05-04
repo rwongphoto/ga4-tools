@@ -7,5 +7,5 @@ numpy
 prophet
 google-generativeai
 holoviews
-bokeh
+bokeh>=3.0
 streamlit-bokeh
