@@ -405,7 +405,7 @@ def create_gapminder_forecast_chart(forecast_df, last_actual_date, granularity_l
             return None
 
         # --- Prepare data for HoloViews ---
-        future_forecast['ds'] = pd.to_datetime(future_forecast['ds'])
+        future_forecast['ds'] = pd.to_datetime(future_forecast['ds']) # Ensure it's datetime
         future_forecast['uncertainty'] = (future_forecast['yhat_upper'] - future_forecast['yhat_lower']).clip(lower=1)
         future_forecast['yhat_int'] = future_forecast['yhat'].round().astype(int)
         future_forecast['yhat_lower_int'] = future_forecast['yhat_lower'].round().astype(int)
@@ -428,21 +428,18 @@ def create_gapminder_forecast_chart(forecast_df, last_actual_date, granularity_l
 
         # --- Create HoloViews Points Element ---
         kdims = ['ds', 'yhat_int']
-        # No real need for ds_str if formatting works in tooltips
         vdims = ['yhat_lower_int', 'yhat_upper_int', 'uncertainty_int', 'size_scaled']
         points_plot = hv.Points(future_forecast, kdims=kdims, vdims=vdims, label="Forecast Point")
 
         # --- Define Tooltips ---
-        # Formatting is handled within the tooltip string definition using Bokeh syntax
         tooltips = [
-            ('Date', '@ds{%F}'),             # Format date using Bokeh field specifier
+            ('Date', '@ds{%F}'),
             ('Forecast (yhat)', '@yhat_int'),
             ('Lower CI', '@yhat_lower_int'),
             ('Upper CI', '@yhat_upper_int'),
             ('Uncertainty Range', '@uncertainty_int'),
             ('Scaled Size', '@size_scaled'),
         ]
-        # REMOVED: formatters = {'@ds': 'datetime'} - Not needed here
 
         # --- Customize the plot using .opts ---
         animated_plot = points_plot.opts(
@@ -455,11 +452,10 @@ def create_gapminder_forecast_chart(forecast_df, last_actual_date, granularity_l
                 alpha=0.7,
                 tools=['hover', 'pan', 'wheel_zoom', 'box_zoom', 'reset', 'save'],
                 hover_tooltips=tooltips,
-                # REMOVED: formatters=formatters, - Incorrect option name/placement
                 ylim=(min_val * 0.95, max_val * 1.05) if pd.notna(min_val) and pd.notna(max_val) and min_val < max_val else None,
                 width=800,
                 height=450,
-                xaxis='datetime',
+                # REMOVED: xaxis='datetime', - Incorrect option, type is inferred from data
                 show_legend=False
              )
         )
