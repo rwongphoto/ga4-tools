@@ -160,41 +160,73 @@ def run_prophet_and_plot(df_original, effective_end_date, google_updates, granul
     return forecast, hist_fit, last_actual_date
 
 # --- Animated Forecast with Plotly Express ---
-def plot_animated_forecast(full_forecast_df):
+def plot_animated_forecast(full_forecast_df, google_updates):
     """
-    Renders an animated, cumulative line chart of Prophet's yhat over time.
+    Animated, cumulative build‐up of actual vs. forecast,
+    with Google‐algorithm‐update overlays.
     """
-    # 1) Make sure it's sorted
+    # 1) Sort once
     df = full_forecast_df.sort_values('ds').copy()
     
-    # 2) Build cumulative frames
+    # 2) Build cumulative frames so each frame shows all points up to that date
     frames = []
     for T in df['ds']:
         sub = df[df['ds'] <= T].copy()
         sub['frame'] = T.strftime("%Y-%m-%d")
         frames.append(sub)
     anim_df = pd.concat(frames, ignore_index=True)
-
-    # 3) Create the animated Plotly figure
+    
+    # 3) Create the Plotly Express figure with two series
     fig = px.line(
         anim_df,
         x='ds',
-        y='yhat',
+        y=['y', 'yhat'],                  # actual and forecast
         animation_frame='frame',
-        labels={'ds': 'Date', 'yhat': 'Forecasted Sessions'},
-        title='Prophet Forecast Animation'
+        animation_group='yhat',
+        labels={'ds':'Date', 'value':'Sessions', 'variable':''},
+        title='Actual vs. Forecast Animation'
     )
-    # show markers + line
+    # show markers + lines
     fig.update_traces(mode='lines+markers')
-    # lock the axes so they don't rescale every frame
+    
+    # 4) Lock the axes to full range of both series
+    y_min = anim_df[['y','yhat']].min().min()
+    y_max = anim_df[['y','yhat']].max().max()
     fig.update_layout(
         xaxis=dict(range=[df['ds'].min(), df['ds'].max()]),
-        yaxis=dict(range=[df['yhat'].min(), df['yhat'].max()]),
+        yaxis=dict(range=[y_min, y_max]),
         legend=dict(title_text='')
     )
-
-    # 4) Render in Streamlit
-    st.subheader("🎞️ Animated Forecast Over Time")
+    
+    # 5) Add Google update spans as background shapes + annotations
+    shapes = []
+    for start_str, end_str, label in google_updates:
+        sd = pd.to_datetime(start_str, format='%Y%m%d')
+        ed = pd.to_datetime(end_str,   format='%Y%m%d')
+        shapes.append({
+            'type': 'rect',
+            'xref': 'x', 'yref': 'paper',
+            'x0': sd,   'x1': ed,
+            'y0': 0,    'y1': 1,
+            'fillcolor': 'LightCoral',
+            'opacity': 0.2,
+            'layer': 'below',
+            'line_width': 0,
+        })
+        # annotation above the plot
+        fig.add_annotation({
+            'x': sd + (ed-sd)/2,
+            'y': 1.02,               # just above top of plot area
+            'xref': 'x', 'yref': 'paper',
+            'text': label,
+            'showarrow': False,
+            'font': {'size': 9, 'color': 'DimGray'},
+            'textangle': -90,
+        })
+    fig.update_layout(shapes=shapes)
+    
+    # 6) Render in Streamlit
+    st.subheader("🎞️ Animated Actual vs. Forecast with Google Updates")
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -305,7 +337,7 @@ def main():
 
     st.markdown("---")
     if full_forecast_df is not None:
-        plot_animated_forecast(full_forecast_df)
+        plot_animated_forecast(full_forecast_df, google_updates)
 
     st.markdown("---")
     if show_future_forecast and full_forecast_df is not None and last_actual_date is not None:
