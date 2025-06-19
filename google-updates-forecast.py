@@ -313,6 +313,7 @@ def main():
         ('20241212','20241218','Dec 2024 Core Update'),
         ('20241219','20241226','Dec 2024 Spam Update'),
         ('20250313','20250327','Mar 2025 Core Update'),
+        ('20250520','20250521','AI Mode US Launch'),
     ]
 
     granularity = st.sidebar.radio("Select Analysis Granularity", ["Daily","Weekly","Monthly"])
