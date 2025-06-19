@@ -61,7 +61,7 @@ Google Updates:
 Provide 3–5 bullet points correlating positive/negative deviations with updates.
 """
     try:
-        model    = genai.GenerativeModel('gemini-1.5-pro')
+        model    = genai.GenerativeModel('gemini-2.5-pro')
         response = model.generate_content(prompt)
         return response.text.replace('•', '*')
     except genai.types.generation_types.BlockedPromptException:
