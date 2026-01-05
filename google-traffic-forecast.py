@@ -175,7 +175,9 @@ def plot_daily_forecast(df_processed, forecast_end_date):
         ('20240506', '20240507', 'Site Rep Abuse'), ('20240514', '20240515', 'AI Overviews'),
         ('20240620', '20240627', 'Jun 24 Core'), ('20240815', '20240903', 'Aug 24 Core'),
         ('20241111', '20241205', 'Nov 24 Core'), ('20241212', '20241218', 'Dec 24 Core'),
-        ('20241219', '20241226', 'Dec 24 Spam'), ('20250313', '20250327', 'Mar 25 Core')
+        ('20241219', '20241226', 'Dec 24 Spam'), ('20250313', '20250327', 'Mar 25 Core'),
+        ('20250520', '20250521', 'AI Mode US Launch'), ('20250630', '20250717', 'Jun 2025 Core Update'),
+        ('20250826', '20250921', 'Aug 2025 Spam Update'), ('20251211', '20251229', 'Dec 2025 Core Update')
     ]
     plot_bottom, plot_top = ax.get_ylim()
     text_y_pos = plot_top * 1.02
