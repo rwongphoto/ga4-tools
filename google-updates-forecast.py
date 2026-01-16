@@ -58,7 +58,7 @@ Analyze actual vs. predicted SEO traffic deviations:
 Google Updates:
 {updates_str}
 
-Provide 3–5 bullet points correlating positive/negative deviations with updates.
+Provide 3–5 bullet points correlating positive/negative deviations with updates. Analysis should also consider trajectory traffic changes following the updates.
 """
     try:
         model    = genai.GenerativeModel('gemini-2.5-pro')
