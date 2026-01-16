@@ -299,6 +299,12 @@ def main():
 
     # Google updates list
     google_updates = [
+        ('20220825','20220909','Helpful Content Release'),
+        ('20220912','20220926','Core Algorithm Update'),
+        ('20220920','20220926','Product Review Algorithm Update'),
+        ('20221019','20221021','Oct 2022 Spam Update'),         
+        ('20221214','20230112','Dec 2022 Link Spam Update'),
+        ('20230221','20230318','Feb 2023 Product Reviews Update'),  
         ('20230315','20230328','Mar 2023 Core Update'),
         ('20230822','20230907','Aug 2023 Core Update'),
         ('20230914','20230928','Sept 2023 Helpful Content Update'),
